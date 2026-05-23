@@ -1,19 +1,17 @@
-from fastapi import FastAPI
+# ⚠️ DEPRECATED - Estrutura movida
+# 
+# Este arquivo foi movido para backend/
+# Para executar o projeto:
+#
+#   cd backend
+#   python run.py
+#
+# Ou use Docker:
+#
+#   docker-compose up --build
+#
+# A API estará disponível em: http://localhost:8000
+# O Frontend em: http://localhost:8080
+#
+# Para mais informações, vê README.md
 
-app = FastAPI()
-
-@app.get("/")
-def home():
-    return {"status": "Neural Strike AI Online", "message": "Sistemas prontos para lucro."}
-
-@app.get("/predict")
-def get_prediction():
-    # Isso simula o sinal que o seu app vai receber
-    return {
-        "match": "Real Madrid vs Man City",
-        "probabilidade": "68%",
-        "odd_justa": 1.47,
-        "sinal": "ELITE VIP",
-        "valor_esperado": "+12%",
-        "moeda": "EUR"
-    }
