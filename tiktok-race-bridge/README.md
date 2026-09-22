@@ -1,31 +1,18 @@
-# HUGOVERSE TikTok Race Bridge
+# HUGOVERSE LIVE RACE — Render
 
-Bridge online para a TikTok LIVE de **@itshugoverse**.
+Este projeto junta:
+- jogo 9:16
+- música/áudio
+- avatar
+- WebSocket
+- bridge TikTok para @itshugoverse
 
-## Render manual config
+## Render
+- Language: Node
+- Build Command: npm install
+- Start Command: npm start
+- Plan: Free
+- Environment variable: TIKTOK_USERNAME=itshugoverse
 
-- Name: `hugoverse-tiktok-bridge`
-- Language: `Node`
-- Branch: `main`
-- Root Directory: `tiktok-race-bridge`
-- Build Command: `npm install`
-- Start Command: `npm start`
-- Plan: `Free`
-- Environment Variable: `TIKTOK_USERNAME=itshugoverse`
-
-O Render fornece `PORT` automaticamente.
-
-## Endpoints
-- `/`
-- `/health`
-- WebSocket no próprio domínio, por exemplo:
-  `wss://hugoverse-tiktok-bridge.onrender.com`
-
-## Eventos
-- comment
-- like
-- follow
-- share
-- gift
-- bridgeStatus
-- liveEnded
+Abrir o URL Render mostra o jogo.
+`/health` mostra o estado do bridge.
