@@ -1,0 +1,16 @@
+{
+  "name": "hugoverse-tiktok-race-bridge",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "node bridge.mjs"
+  },
+  "dependencies": {
+    "piratetok-live-js": "latest",
+    "ws": "latest"
+  }
+}
