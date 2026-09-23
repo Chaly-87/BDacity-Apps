@@ -5,8 +5,7 @@ import { fileURLToPath } from "node:url";
 import {
   TikTokLiveClient,
   EventType,
-  GiftStreakTracker,
-  LikeAccumulator
+  GiftStreakTracker
 } from "piratetok-live-js";
 import { WebSocketServer, WebSocket } from "ws";
 
@@ -27,7 +26,6 @@ let sequence = 0;
 let reconnectTimer = null;
 
 const giftTracker = new GiftStreakTracker();
-const likeAccumulator = new LikeAccumulator();
 
 function nextId(prefix) {
   sequence += 1;
@@ -164,29 +162,18 @@ client.on(EventType.chat, (data) => {
 client.on(EventType.like, (data) => {
   const username = usernameFrom(data);
 
-  try {
-    const stats = likeAccumulator.process(data);
-    const count = Math.max(
-      1,
-      Number(stats?.accumulatedCount ?? data?.count ?? data?.likeCount ?? 1) || 1
-    );
+  const count = Math.max(
+    1,
+    Number(data?.likeCount ?? data?.count ?? 1) || 1
+  );
 
-    broadcast({
-      id: nextId("like"),
-      type: "like",
-      username,
-      count,
-      totalLikeCount: Number(stats?.totalLikeCount ?? data?.total ?? 0) || 0
-    });
-  } catch (err) {
-    console.warn("[LIKE] fallback:", err?.message || err);
-    broadcast({
-      id: nextId("like"),
-      type: "like",
-      username,
-      count: Math.max(1, Number(data?.count ?? data?.likeCount ?? 1) || 1)
-    });
-  }
+  broadcast({
+    id: nextId("like"),
+    type: "like",
+    username,
+    count,
+    totalLikeCount: Number(data?.totalLikeCount ?? data?.total ?? 0) || 0
+  });
 });
 
 client.on(EventType.follow, (data) => {
