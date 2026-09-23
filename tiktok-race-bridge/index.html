@@ -20,9 +20,9 @@ body{display:flex;align-items:center;justify-content:center}
 #game-container{position:absolute;inset:0}
 #host-cam{
   position:absolute;
-  right:7%;
+  right:5%;
   bottom:14%;
-  width:21%;
+  width:24%;
   aspect-ratio:0.82;
   border:2px solid #25f4ee;
   border-radius:10px;overflow:hidden;
@@ -33,6 +33,23 @@ body{display:flex;align-items:center;justify-content:center}
   width:100%;height:100%;object-fit:cover;
   transform:scale(1.02);
   animation:breath 3.8s ease-in-out infinite alternate;
+}
+#host-badge{
+  position:absolute;
+  left:50%;
+  top:22px;
+  transform:translateX(-50%);
+  background:rgba(5,5,9,.88);
+  color:#25f4ee;
+  font:bold 8px/1.2 Arial,sans-serif;
+  letter-spacing:.08em;
+  padding:2px 7px;
+  border:1px solid rgba(37,244,238,.55);
+  border-radius:8px;
+  z-index:30;
+  white-space:nowrap;
+  pointer-events:none;
+  box-shadow:0 1px 6px rgba(0,0,0,.45);
 }
 #live-tag{
   position:absolute;left:50%;top:3px;transform:translateX(-50%);
@@ -67,6 +84,7 @@ body{display:flex;align-items:center;justify-content:center}
 <div id="shell">
   <div id="game-container"></div>
   <div id="host-cam" aria-label="Host live camera">
+    <div id="host-badge">HOST LIVE</div>
     <div id="live-tag">● LIVE</div>
     <div id="bridge-tag" style="position:absolute;left:50%;bottom:3px;transform:translateX(-50%);background:rgba(0,0,0,.72);color:#ffd34d;font:bold 7px Arial;padding:2px 5px;border-radius:8px;z-index:5;white-space:nowrap">LOCAL MODE</div>
 
@@ -682,6 +700,7 @@ function resetRaceState(){
     showWaitingForInteraction();
     return false;
   }
+  stopAmbientPresence();
   toCreate.forEach(e=>activeRacers.set(e.username,makeRacer(e.username,e.teamId)));
   positionRacersOnStartingGrid();
   updateAllHud();
@@ -2032,6 +2051,103 @@ function handleRealGift(ev) {
 
 
 let liveInteractionStarted = false;
+let ambientPresenceRunning=false;
+let ambientPresenceObjs=[];
+let ambientPresenceDemoCars=[];
+let ambientPresenceTick=null;
+
+function startAmbientPresence(){
+  if(ambientPresenceRunning)return;
+  if(!scene)return;
+  if(lobbyOpen||raceStarted||countdownActive||raceOver||activeRacers.size>0)return;
+  ambientPresenceRunning=true;
+  ambientPresenceObjs=[];
+  ambientPresenceDemoCars=[];
+
+  const glow=scene.add.ellipse(TRACK.cx,TRACK.cy,TRACK.rx*1.7,TRACK.ry*1.45,CYAN,.045)
+    .setDepth(2).setBlendMode(Phaser.BlendModes.ADD);
+  ambientPresenceObjs.push(glow);
+  scene.tweens.add({targets:glow,alpha:{from:.35,to:1},scaleX:{from:.98,to:1.03},scaleY:{from:.98,to:1.03},duration:2200,yoyo:true,repeat:-1,ease:'Sine.easeInOut'});
+
+  const rim=scene.add.ellipse(TRACK.cx,TRACK.cy,TRACK.rx*1.05,TRACK.ry*1.05,PINK,.03)
+    .setDepth(3).setBlendMode(Phaser.BlendModes.ADD);
+  ambientPresenceObjs.push(rim);
+  scene.tweens.add({targets:rim,alpha:{from:.25,to:.9},duration:1600,yoyo:true,repeat:-1,ease:'Sine.easeInOut'});
+
+  for(let i=0;i<14;i++){
+    const p=scene.add.circle(
+      Phaser.Math.Between(100,W-100),
+      Phaser.Math.Between(240,H-120),
+      Phaser.Math.Between(1,3),
+      i%2?PINK:CYAN,
+      Phaser.Math.FloatBetween(.12,.35)
+    ).setDepth(4);
+    ambientPresenceObjs.push(p);
+    scene.tweens.add({
+      targets:p,
+      y:p.y-Phaser.Math.Between(18,50),
+      alpha:{from:.1,to:.55},
+      duration:Phaser.Math.Between(1800,3600),
+      yoyo:true,repeat:-1,ease:'Sine.easeInOut',delay:i*90
+    });
+  }
+
+  const demos=[
+    {angle:.4,speed:.0042,color:0x4aa3ff,lane:-18},
+    {angle:3.4,speed:.0036,color:0x34c759,lane:22}
+  ];
+  demos.forEach((d,i)=>{
+    const car=drawCar(1,d.color).setAlpha(.82);
+    const c=scene.add.container(
+      TRACK.cx+Math.cos(d.angle)*TRACK.rx,
+      TRACK.cy+Math.sin(d.angle)*TRACK.ry+d.lane,
+      [car]
+    ).setDepth(6).setAlpha(0);
+    c.__angle=d.angle;
+    c.__speed=d.speed;
+    c.__lane=d.lane;
+    ambientPresenceDemoCars.push(c);
+    ambientPresenceObjs.push(c);
+    scene.tweens.add({targets:c,alpha:1,duration:900,delay:400+i*350});
+  });
+
+  ambientPresenceTick=scene.time.addEvent({
+    delay:33,loop:true,callback:()=>{
+      if(!ambientPresenceRunning)return;
+      if(lobbyOpen||raceStarted||countdownActive||raceOver||activeRacers.size>0){
+        stopAmbientPresence();
+        return;
+      }
+      ambientPresenceDemoCars.forEach(c=>{
+        if(!c||!c.scene)return;
+        c.__angle+=c.__speed;
+        if(c.__angle>=Math.PI*2)c.__angle-=Math.PI*2;
+        c.x=TRACK.cx+Math.cos(c.__angle)*TRACK.rx;
+        c.y=TRACK.cy+Math.sin(c.__angle)*TRACK.ry+c.__lane;
+        c.rotation=c.__angle+Math.PI/2;
+      });
+    }
+  });
+}
+
+function stopAmbientPresence(){
+  if(!ambientPresenceRunning)return;
+  ambientPresenceRunning=false;
+  try{if(ambientPresenceTick)ambientPresenceTick.remove(false);}catch(e){}
+  ambientPresenceTick=null;
+  ambientPresenceObjs.forEach(o=>{try{if(o&&o.scene)o.destroy();}catch(e){}});
+  ambientPresenceObjs=[];
+  ambientPresenceDemoCars=[];
+}
+
+if(typeof window!=='undefined'){
+  window.__ambientPresence={
+    start:startAmbientPresence,
+    stop:stopAmbientPresence,
+    isRunning:()=>ambientPresenceRunning,
+    demoCount:()=>ambientPresenceDemoCars.length
+  };
+}
 
 function showWaitingForInteraction(){
   raceStarted=false;
@@ -2046,11 +2162,13 @@ function showWaitingForInteraction(){
       .setScale(.88);
   }
   pushEvent('LIVE pronta — a corrida começa com a primeira interação real.');
+  startAmbientPresence();
 }
 
 function scheduleRaceStart(){
   if(lobbyOpen||raceStarted||countdownActive||raceOver)return;
   if(!hasFreshQueued())return;
+  stopAmbientPresence();
   lobbyOpen=true;
   updateAllHud();
   if(centerBanner){
