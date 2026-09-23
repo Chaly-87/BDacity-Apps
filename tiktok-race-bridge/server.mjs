@@ -12,13 +12,17 @@ import { WebSocketServer, WebSocket } from "ws";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const PUBLIC_DIR = path.join(__dirname, "public");
+const PUBLIC_DIR = __dirname;
+
 const USERNAME = String(process.env.TIKTOK_USERNAME || "itshugoverse")
   .replace(/^@/, "")
   .trim();
 const PORT = Number(process.env.PORT || 10000);
+const RECONNECT_DELAY = 15000;
 
 let tikTokConnected = false;
+let connecting = false;
+let shuttingDown = false;
 let sequence = 0;
 let reconnectTimer = null;
 
@@ -43,10 +47,12 @@ function usernameFrom(data) {
 function serveFile(res, filePath, contentType) {
   fs.readFile(filePath, (err, data) => {
     if (err) {
+      console.error(`[HTTP] Não foi possível servir ${filePath}:`, err.message);
       res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
       res.end("Not found");
       return;
     }
+
     res.writeHead(200, {
       "Content-Type": contentType,
       "Cache-Control": "no-store"
@@ -57,19 +63,22 @@ function serveFile(res, filePath, contentType) {
 
 const server = http.createServer((req, res) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Cache-Control", "no-store");
 
-  if (req.url === "/health") {
-    res.writeHead(200, { "Content-Type": "application/json" });
+  const requestPath = new URL(req.url || "/", "http://localhost").pathname;
+
+  if (requestPath === "/health") {
+    res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
     res.end(JSON.stringify({
       ok: true,
-      tiktokConnected,
+      tiktokConnected: tikTokConnected,
       username: USERNAME,
       websocketClients: wss.clients.size
     }));
     return;
   }
 
-  if (req.url === "/" || req.url === "/index.html") {
+  if (requestPath === "/" || requestPath === "/index.html") {
     serveFile(res, path.join(PUBLIC_DIR, "index.html"), "text/html; charset=utf-8");
     return;
   }
@@ -85,7 +94,11 @@ function broadcast(payload) {
 
   for (const socket of wss.clients) {
     if (socket.readyState === WebSocket.OPEN) {
-      socket.send(body);
+      try {
+        socket.send(body);
+      } catch (err) {
+        console.warn("[GAME] Falha ao enviar WebSocket:", err?.message || err);
+      }
     }
   }
 
@@ -96,9 +109,17 @@ function broadcast(payload) {
   );
 }
 
+function broadcastStatus() {
+  broadcast({
+    id: nextId("status"),
+    type: "bridgeStatus",
+    connected: tikTokConnected,
+    username: USERNAME
+  });
+}
+
 wss.on("connection", (socket) => {
   console.log("[GAME] Jogo ligado ao WebSocket.");
-
   socket.send(JSON.stringify({
     id: nextId("status"),
     type: "bridgeStatus",
@@ -107,15 +128,17 @@ wss.on("connection", (socket) => {
   }));
 
   socket.on("close", () => console.log("[GAME] Jogo desligado."));
-  socket.on("error", err => console.warn("[GAME] WS error:", err?.message || err));
+  socket.on("error", (err) => {
+    console.warn("[GAME] WebSocket error:", err?.message || err);
+  });
 });
 
 server.listen(PORT, "0.0.0.0", () => {
   console.log("=============================================");
-  console.log(" HUGOVERSE LIVE RACE");
+  console.log(" HUGOVERSE TikTok Race Bridge");
   console.log("=============================================");
   console.log(`TikTok: @${USERNAME}`);
-  console.log(`Port: ${PORT}`);
+  console.log(`HTTP/WebSocket port: ${PORT}`);
   console.log("Game: /");
   console.log("Health: /health");
   console.log("=============================================\n");
@@ -129,7 +152,7 @@ const client = new TikTokLiveClient(USERNAME)
   .language("pt")
   .region("PT");
 
-client.on(EventType.chat, data => {
+client.on(EventType.chat, (data) => {
   broadcast({
     id: nextId("chat"),
     type: "comment",
@@ -138,7 +161,7 @@ client.on(EventType.chat, data => {
   });
 });
 
-client.on(EventType.like, data => {
+client.on(EventType.like, (data) => {
   const username = usernameFrom(data);
 
   try {
@@ -157,7 +180,6 @@ client.on(EventType.like, data => {
     });
   } catch (err) {
     console.warn("[LIKE] fallback:", err?.message || err);
-
     broadcast({
       id: nextId("like"),
       type: "like",
@@ -167,7 +189,7 @@ client.on(EventType.like, data => {
   }
 });
 
-client.on(EventType.follow, data => {
+client.on(EventType.follow, (data) => {
   broadcast({
     id: nextId("follow"),
     type: "follow",
@@ -175,7 +197,7 @@ client.on(EventType.follow, data => {
   });
 });
 
-client.on(EventType.share, data => {
+client.on(EventType.share, (data) => {
   broadcast({
     id: nextId("share"),
     type: "share",
@@ -183,17 +205,15 @@ client.on(EventType.share, data => {
   });
 });
 
-client.on(EventType.gift, data => {
+client.on(EventType.gift, (data) => {
   const username = usernameFrom(data);
 
   try {
     const streak = giftTracker.process(data);
-
     const repeatCount = Math.max(
       1,
       Number(streak?.eventGiftCount ?? data?.repeatCount ?? 1) || 1
     );
-
     const diamondCount = Math.max(
       1,
       Number(data?.gift?.diamondCount ?? 1) || 1
@@ -212,15 +232,11 @@ client.on(EventType.gift, data => {
     });
   } catch (err) {
     console.warn("[GIFT] fallback:", err?.message || err);
-
     const diamondCount = Math.max(
       1,
       Number(data?.gift?.diamondCount ?? 1) || 1
     );
-    const repeatCount = Math.max(
-      1,
-      Number(data?.repeatCount ?? 1) || 1
-    );
+    const repeatCount = Math.max(1, Number(data?.repeatCount ?? 1) || 1);
 
     broadcast({
       id: nextId("gift"),
@@ -237,56 +253,65 @@ client.on(EventType.gift, data => {
 
 client.on(EventType.liveEnded, () => {
   tikTokConnected = false;
-  console.log("[TIKTOK] LIVE terminou.");
-
+  console.log("[TIKTOK] LIVE terminou ou deixou de estar disponível.");
   broadcast({
-    id: nextId("ended"),
+    id: nextId("live-ended"),
     type: "liveEnded",
     username: USERNAME
   });
-
-  scheduleReconnect(15000);
+  broadcastStatus();
+  scheduleReconnect(RECONNECT_DELAY);
 });
 
-function scheduleReconnect(ms) {
-  if (reconnectTimer) return;
+function scheduleReconnect(delay = RECONNECT_DELAY) {
+  if (shuttingDown || reconnectTimer) return;
+
   reconnectTimer = setTimeout(() => {
     reconnectTimer = null;
-    connectTikTok();
-  }, ms);
+    void connectTikTok();
+  }, delay);
 }
 
 async function connectTikTok() {
-  if (tikTokConnected) return;
+  if (shuttingDown || tikTokConnected || connecting) return;
 
+  connecting = true;
   console.log(`[TIKTOK] A ligar a @${USERNAME}...`);
 
   try {
     await client.connect();
     tikTokConnected = true;
-    console.log(`[TIKTOK] Ligado a @${USERNAME}.`);
-
-    broadcast({
-      id: nextId("status"),
-      type: "bridgeStatus",
-      connected: true,
-      username: USERNAME
-    });
+    console.log(`[TIKTOK] Ligado com sucesso a @${USERNAME}.`);
+    broadcastStatus();
   } catch (err) {
     tikTokConnected = false;
-    console.error("[TIKTOK] Ligação falhou:", err?.message || err);
-    scheduleReconnect(15000);
+    console.error(
+      "[TIKTOK] Ligação falhou (normal se a conta não estiver LIVE):",
+      err?.message || err
+    );
+    scheduleReconnect(RECONNECT_DELAY);
+  } finally {
+    connecting = false;
   }
 }
 
-process.on("SIGTERM", async () => {
-  try { await client.disconnect?.(); } catch {}
-  server.close(() => process.exit(0));
-});
+async function shutdown(signal) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  if (reconnectTimer) clearTimeout(reconnectTimer);
 
-process.on("SIGINT", async () => {
-  try { await client.disconnect?.(); } catch {}
-  server.close(() => process.exit(0));
-});
+  console.log(`[APP] ${signal} recebido; a desligar.`);
+  try {
+    await client.disconnect?.();
+  } catch (err) {
+    console.warn("[TIKTOK] Erro ao desligar:", err?.message || err);
+  }
 
-connectTikTok();
+  wss.close();
+  server.close(() => process.exit(0));
+}
+
+process.once("SIGTERM", () => void shutdown("SIGTERM"));
+process.once("SIGINT", () => void shutdown("SIGINT"));
+
+void connectTikTok();
