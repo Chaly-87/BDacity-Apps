@@ -11,10 +11,9 @@ html,body{width:100%;height:100%;overflow:hidden;background:#000;font-family:Ari
 body{display:flex;align-items:center;justify-content:center}
 #shell{
   position:relative;
-  width:min(100vw, calc(100vh * 9 / 16), 720px);
+  width:min(100vw,720px);
+  height:min(100vh,1280px);
   aspect-ratio:9/16;
-  height:auto;
-  max-height:100vh;
   background:#050507;
   overflow:hidden;
 }
@@ -219,6 +218,95 @@ const ATTACKS={
   tornado:{label:'🌪️ TORNADO',points:500}
 };
 
+const COMPLIANCE_MODE={
+  enabled:true,
+  likesAffectRace:false,
+  followsAffectRace:false,
+  sharesAffectRace:false,
+  giftsAffectRace:false,
+  giftsCosmeticOnly:true,
+  giftAttacksEnabled:false,
+  likeMilestonesEnabled:false,
+  engagementCTAEnabled:false,
+  autoAssignTeam:false,
+  hostAndAutomaticEventsOnly:true
+};
+
+function canAffectRace(source){
+  if(!COMPLIANCE_MODE.enabled)return true;
+  return !['like','follow','share','gift'].includes(source);
+}
+
+const FORBIDDEN_PATTERNS=[
+  'LIKES = NITRO',
+  '1000 LIKES = HYPERCAR',
+  'GIFTS = POWER',
+  'GIFTS +50% ENERGY',
+  'FOLLOW BOOST',
+  'SHARE BOOST'
+];
+
+function complianceLog(msg){
+  console.log('[COMPLIANCE] '+msg);
+}
+
+function scanCompliancePatterns(content){
+  let c=String(content||'');
+  const defStart=c.indexOf('const FORBIDDEN_PATTERNS');
+  if(defStart>=0){
+    const defEnd=c.indexOf('];',defStart);
+    if(defEnd>defStart)c=c.slice(0,defStart)+c.slice(defEnd+2);
+  }
+  const hits=FORBIDDEN_PATTERNS.filter(p=>c.includes(p));
+  if(hits.length)complianceLog('Unsafe mechanic detected: '+hits.join(' | '));
+  return hits;
+}
+
+function auditCompliance(){
+  const fails=[];
+  const body=fn=>Function.prototype.toString.call(fn);
+  const has=(fn,re)=>re.test(body(fn));
+  if(has(onLike,/addEnergy\s*\(|\bnitro\s*\(|racePoints\s*\+=|\.score\s*\+=|replaceCar\s*\(|damageTeam\s*\(/))
+    fails.push('onLike mutates race');
+  if(has(onFollow,/addEnergy\s*\(|\bnitro\s*\(|racePoints\s*\+=|\.score\s*\+=/))
+    fails.push('onFollow mutates race');
+  if(has(onShare,/addEnergy\s*\(|\bnitro\s*\(|racePoints\s*\+=|\.score\s*\+=/))
+    fails.push('onShare mutates race');
+  if(has(handleGift,/attackGift\s*\(|replaceCar\s*\(|addEnergy\s*\(|\bnitro\s*\(|damageTeam\s*\(|racePoints\s*\+=|\.hp\s*[-+]=|\.tier\s*=|r\.speed\s*[+\-=]/))
+    fails.push('handleGift mutates race');
+  if(has(handleRealGift,/attackGift\s*\(/))
+    fails.push('handleRealGift calls attackGift');
+  if(has(checkLikeMilestoneReward,/\bnitro\s*\(|addEnergy\s*\(|replaceCar\s*\(|racePoints\s*\+=/))
+    fails.push('checkLikeMilestoneReward active');
+  if(has(unlockPowerCarForLikes,/\bnitro\s*\(|addEnergy\s*\(|replaceCar\s*\(|racePoints\s*\+=/))
+    fails.push('unlockPowerCarForLikes active');
+  return fails;
+}
+
+function initCompliance(scriptContent){
+  complianceLog(COMPLIANCE_MODE.enabled?'mode enabled':'mode DISABLED');
+  if(COMPLIANCE_MODE.giftsCosmeticOnly)complianceLog('gifts cosmetic only');
+  complianceLog('competitive engagement disabled');
+  scanCompliancePatterns(scriptContent||'');
+  const fails=auditCompliance();
+  if(fails.length){
+    COMPLIANCE_MODE.enabled=true;
+    COMPLIANCE_MODE.likesAffectRace=false;
+    COMPLIANCE_MODE.followsAffectRace=false;
+    COMPLIANCE_MODE.sharesAffectRace=false;
+    COMPLIANCE_MODE.giftsAffectRace=false;
+    COMPLIANCE_MODE.giftsCosmeticOnly=true;
+    COMPLIANCE_MODE.giftAttacksEnabled=false;
+    COMPLIANCE_MODE.likeMilestonesEnabled=false;
+    COMPLIANCE_MODE.engagementCTAEnabled=false;
+    COMPLIANCE_MODE.hostAndAutomaticEventsOnly=true;
+    complianceLog('audit FAIL: '+fails.join('; '));
+    return false;
+  }
+  complianceLog('audit PASS');
+  return true;
+}
+
 let scene;
 let teams=[];
 let raceTime=180,raceStarted=false,raceOver=false;
@@ -234,6 +322,20 @@ let selectedTeam=0;
 let finalSprintActive=false;
 let nextEventRaceTime=150;
 let eventSerial=0;
+let countdownActive=false;
+let lobbyOpen=false;
+let lobbyTimer=null;
+const LOBBY_MS=4000;
+let queuedPlayers=new Map();
+let activeRacers=new Map();
+const MAX_RACERS=16;
+const INACTIVE_QUEUE_MS=5*60*1000;
+const GRID_MAX_DEPTH=.55;
+const GRID_MARGIN=10;
+const GRID_PAD_ALONG=6;
+const GRID_MIN_SCALE=.35;
+const TRACK={cx:360,cy:650,rx:222,ry:353,outerTop:274,innerTop:370};
+const START_LINE={x:296,y:273,cell:16,cols:8,rows:3};
 
 const config={
   type:Phaser.AUTO,width:W,height:H,parent:'game-container',
@@ -261,6 +363,8 @@ function addTimer(t){gameTimers.push(t);return t}
 function clearTimers(){
   gameTimers.forEach(t=>{try{t.remove(false)}catch(e){}});
   gameTimers=[];
+  if(lobbyTimer){try{lobbyTimer.remove(false)}catch(e){} lobbyTimer=null;}
+  lobbyOpen=false;
 }
 
 function buildArena(){
@@ -278,11 +382,11 @@ function buildArena(){
   g.fillStyle(0x173c2c,1);g.fillRoundedRect(34,228,652,850,42);
   g.lineStyle(7,PINK,.35);g.strokeRoundedRect(58,250,604,800,300);
   g.lineStyle(3,CYAN,.42);g.strokeRoundedRect(76,268,568,764,285);
-  g.fillStyle(0x282a30,1);g.fillRoundedRect(82,274,556,752,280);
+  g.fillStyle(0x282a30,1);g.fillRoundedRect(82,TRACK.outerTop,556,752,280);
   g.lineStyle(3,0xffffff,.10);g.strokeRoundedRect(132,326,456,650,230);
-  g.fillStyle(0x10291d,1);g.fillRoundedRect(182,370,356,555,178);
+  g.fillStyle(0x10291d,1);g.fillRoundedRect(182,TRACK.innerTop,356,555,178);
 
-  const sx=296,sy=273,cell=16;
+  const sx=START_LINE.x,sy=START_LINE.y,cell=START_LINE.cell;
   for(let r=0;r<3;r++)for(let c=0;c<8;c++){
     g.fillStyle((r+c)%2?0xffffff:0x111111,1);
     g.fillRect(sx+c*cell,sy+r*cell,cell,cell);
@@ -295,11 +399,15 @@ function buildArena(){
 
 function buildHud(){
   scene.add.rectangle(360,62,680,104,0x07070a,.96).setStrokeStyle(3,PINK);
-  scene.add.text(360,26,'COMENTA 1  2  3  4  PARA ESCOLHER EQUIPA',{
+  scene.add.text(360,26,'ESCOLHE A TUA EQUIPA • CORRIDA AO VIVO • EVENTOS ESPECIAIS',{
     fontSize:'18px',fontStyle:'bold',color:'#fff'
   }).setOrigin(.5);
-  scene.add.text(360,53,'LIKES = NITRO   •   1000 LIKES = HYPERCAR   •   GIFTS = POWER',{
+  scene.add.text(360,53,'COMENTA 1 2 3 4 PARA ENTRAR NA PRÓXIMA CORRIDA',{
     fontSize:'13px',fontStyle:'bold',color:'#25f4ee'
+  }).setOrigin(.5);
+  window._gridStatusText=scene.add.text(360,71,'',{
+    fontSize:'12px',fontStyle:'bold',color:'#ffd34d',
+    stroke:'#000',strokeThickness:3
   }).setOrigin(.5);
 
   const xs=[100,270,450,620];
@@ -320,7 +428,7 @@ function buildHud(){
     stroke:'#000',strokeThickness:3
   }).setOrigin(.5);
 
-  scene.add.text(360,169,'🔥 CADA 1000 LIKES DE UM VIEWER = HYPERCAR PARA A EQUIPA',{
+  scene.add.text(360,169,'🏁 EVENTOS ESPECIAIS ACONTECEM DURANTE A CORRIDA',{
     fontSize:'11px',fontStyle:'bold',color:'#ffffff',
     stroke:'#000',strokeThickness:3
   }).setOrigin(.5);
@@ -375,10 +483,10 @@ function buildHud(){
   });
 
   scene.add.rectangle(445,1172,160,100,0x08080c,.96).setStrokeStyle(2,GOLD);
-  scene.add.text(445,1138,'TOP SUPPORTER',{
+  scene.add.text(445,1138,'RECENT PLAYER',{
     fontSize:'12px',fontStyle:'bold',color:'#ffd34d'
   }).setOrigin(.5);
-  window._topText=scene.add.text(445,1162,'---\n0 pts',{
+  window._topText=scene.add.text(445,1162,'---',{
     fontSize:'12px',fontStyle:'bold',color:'#fff',align:'center'
   }).setOrigin(.5,0);
 }
@@ -386,10 +494,8 @@ function buildHud(){
 function initTeams(){
   teams=[];
   for(let i=0;i<4;i++){
-    const racer=makeRacer(i);
     teams.push({
       id:i,name:TEAM_NAMES[i],color:TEAM_COLORS[i],
-      racer,
       members:new Set(),
       supporterStats:new Map(),
       energy:0,
@@ -404,26 +510,25 @@ function initTeams(){
   }
 }
 
-function makeRacer(i){
-  const tier=0;
-  const vehicle=drawCar(tier,TEAM_COLORS[i]);
-  const teamLabel=scene.add.text(0,-42,TEAM_NAMES[i],{
-    fontSize:'14px',fontStyle:'bold',color:'#fff',
-    backgroundColor:'#050507',padding:{x:5,y:2}
-  }).setOrigin(.5);
+function makeRacer(username,teamId){
+  const tier=1;
+  const vehicle=drawCar(tier,teams[teamId].color);
+  const teamBadge=scene.add.circle(0,-24,4,teams[teamId].color,1)
+    .setStrokeStyle(1,0xffffff,.85);
 
-  const supporterLabel=scene.add.text(0,-24,'',{
+  const nameLabel=scene.add.text(6,-24,username,{
     fontSize:'10px',fontStyle:'bold',color:'#ffd34d',
     backgroundColor:'#050507',padding:{x:3,y:1}
-  }).setOrigin(.5);
+  }).setOrigin(0,.5);
 
   const hpBg=scene.add.rectangle(0,36,48,6,0x333333,1);
   const hpBar=scene.add.rectangle(-24,36,48,6,0x59d85c,1).setOrigin(0,.5);
-  const c=scene.add.container(360,300,[vehicle,teamLabel,supporterLabel,hpBg,hpBar]).setDepth(10+i);
+  const c=scene.add.container(360,300,[vehicle,teamBadge,nameLabel,hpBg,hpBar]).setDepth(10+teamId);
 
   return {
-    container:c,vehicle,teamLabel,supporterLabel,hpBar,
-    tier,angle:(i*Math.PI)/2,laps:0,progress:0,
+    container:c,vehicle,teamBadge,nameLabel,hpBar,
+    username,teamId,
+    tier,angle:0,laps:0,progress:0,laneOffset:0,
     speed:CAR_TIERS[tier].speed,
     hp:CAR_TIERS[tier].durability,
     maxHp:CAR_TIERS[tier].durability,
@@ -435,42 +540,95 @@ function makeRacer(i){
 function drawCar(tier,teamColor){
   const cfg=CAR_TIERS[tier];
   const c=scene.add.container(0,0);
-  const g=scene.add.graphics();
+  const body=scene.add.graphics();
+  const detail=scene.add.graphics();
+  const glow=scene.add.graphics();
   const col=tier===0?0x8b8b8b:cfg.color;
+  const halfW=19+tier*3;
+  const halfH=11+tier*.4;
+
+  glow.fillStyle(teamColor,tier===0?.10:.28);
+  glow.fillEllipse(0,2,halfW*2+14,halfH*2+10);
+  c.add(glow);
+
+  body.fillStyle(0x000000,.45);
+  body.fillEllipse(2,7,halfW*2+4,halfH*2+4);
+
+  detail.fillStyle(0x0a0a0c,1);
+  const wy=halfH-1;
+  [[-halfW+3,-wy],[halfW-9,-wy],[-halfW+3,wy-6],[halfW-9,wy-6]].forEach(([wx,yy])=>{
+    detail.fillRoundedRect(wx,yy,6,7,2);
+    detail.fillStyle(0x555a63,1);
+    detail.fillCircle(wx+3,yy+3.5,1.6);
+    detail.fillStyle(0x0a0a0c,1);
+  });
 
   if(tier===0){
-    g.fillStyle(col,1);g.fillRoundedRect(-19,-12,38,24,5);
-    g.fillStyle(0x5e5e5e,1);g.fillRect(-14,-9,11,7);g.fillRect(3,-7,10,6);
-    g.lineStyle(2,0x2b2b2b,1);g.lineBetween(-8,-12,4,12);
+    body.fillStyle(col,1);body.fillRoundedRect(-halfW,-halfH,halfW*2,halfH*2,5);
+    body.fillStyle(0x5e5e5e,1);body.fillRect(-14,-8,11,7);body.fillRect(3,-6,10,6);
+    detail.lineStyle(2,0x2b2b2b,1);detail.lineBetween(-8,-halfH,4,halfH);
+    detail.fillStyle(0x9aa0a8,.5);detail.fillRect(-halfW+3,-halfH+2,halfW*2-6,2);
+    detail.fillStyle(0xfff3b0,.9);detail.fillRect(halfW-4,-4,3,3);detail.fillRect(halfW-4,2,3,3);
+    detail.fillStyle(0xff5a5a,.75);detail.fillRect(-halfW+1,-4,2,3);detail.fillRect(-halfW+1,2,2,3);
   }else if(tier===1){
-    g.fillStyle(col,1);g.fillRoundedRect(-22,-12,44,24,7);
-    g.fillStyle(0x14202d,1);g.fillRoundedRect(-11,-9,22,10,4);
-    g.fillStyle(teamColor,.8);g.fillRect(-21,4,42,4);
+    body.fillStyle(col,1);body.fillRoundedRect(-halfW,-halfH,halfW*2,halfH*2,7);
+    body.fillStyle(0x14202d,.95);body.fillRoundedRect(-11,-8,22,10,4);
+    detail.fillStyle(teamColor,.85);detail.fillRect(-halfW+2,4,halfW*2-4,3);
+    detail.fillStyle(0xffffff,.20);detail.fillRect(-halfW+4,-halfH+2,halfW-6,2);
+    detail.fillStyle(0xdfe9ff,1);detail.fillRect(halfW-4,-5,3,4);detail.fillRect(halfW-4,2,3,4);
+    detail.fillStyle(0xff5a5a,.9);detail.fillRect(-halfW+1,-5,2,4);detail.fillRect(-halfW+1,2,2,4);
+    detail.fillStyle(teamColor,.95);detail.fillRect(-halfW-2,-halfH+4,3,halfH*2-8);
+    detail.fillStyle(0x1a1a1e,1);detail.fillRect(-halfW-4,6,halfW*2+8,3);
   }else if(tier===2){
-    g.fillStyle(col,1);g.fillRoundedRect(-25,-12,50,24,9);
-    g.fillStyle(0x111827,1);g.fillRoundedRect(-12,-9,24,9,4);
-    g.fillStyle(teamColor,1);g.fillRect(-19,7,38,3);
-    g.fillRect(-27,10,54,3);
+    body.fillStyle(col,1);body.fillRoundedRect(-halfW,-halfH,halfW*2,halfH*2,9);
+    body.fillStyle(0x111827,.98);body.fillRoundedRect(-12,-8,24,9,4);
+    detail.fillStyle(teamColor,1);detail.fillRect(-halfW+4,7,halfW*2-8,3);
+    detail.lineStyle(2,0x111111,1);detail.strokeRoundedRect(-halfW,-halfH,halfW*2,halfH*2,9);
+    detail.fillStyle(0xffffff,.22);detail.fillRect(-halfW+5,-halfH+2,halfW-8,2);
+    detail.fillStyle(0xe8f1ff,1);detail.fillRect(halfW-4,-6,4,5);detail.fillRect(halfW-4,2,4,5);
+    detail.fillStyle(0xff4444,1);detail.fillRect(-halfW+1,-6,3,5);detail.fillRect(-halfW+1,2,3,5);
+    detail.fillStyle(teamColor,1);detail.fillRect(-halfW-5,-halfH+3,4,halfH*2-6);
+    detail.fillStyle(0x141418,1);
+    detail.fillTriangle(-halfW-6,10,-halfW+2,10,-halfW+8,4);
+    detail.fillTriangle(halfW+6,10,halfW-2,10,halfW-8,4);
+    detail.fillStyle(0x0d0d10,1);detail.fillRect(-halfW-3,halfH+1,halfW*2+6,4);
   }else if(tier===3){
-    g.fillStyle(col,1);
-    g.fillTriangle(-27,11,27,11,17,-14);
-    g.fillTriangle(-27,11,-17,-14,17,-14);
-    g.fillStyle(0x0f172a,1);g.fillTriangle(-11,-8,11,-8,0,2);
-    g.fillStyle(teamColor,.9);g.fillRect(-20,8,40,3);
+    body.fillStyle(col,1);
+    body.fillTriangle(-halfW,halfH,halfW,halfH,halfW-10,-halfH-3);
+    body.fillTriangle(-halfW,halfH,-halfW+10,-halfH-3,halfW-10,-halfH-3);
+    detail.fillStyle(0x0f172a,.98);detail.fillTriangle(-11,-7,11,-7,0,3);
+    detail.fillStyle(teamColor,.95);detail.fillRect(-halfW+3,8,halfW*2-6,3);
+    detail.fillStyle(0xffffff,.25);detail.fillRect(-halfW+7,-halfH+4,halfW-16,2);
+    detail.fillStyle(0xeef4ff,1);detail.fillRect(halfW-5,-7,4,5);detail.fillRect(halfW-5,2,4,5);
+    detail.fillStyle(0xff3b30,1);detail.fillRect(-halfW+1,-7,3,5);detail.fillRect(-halfW+1,2,3,5);
+    detail.fillStyle(teamColor,1);detail.fillRect(-halfW-5,-halfH+2,4,halfH*2-4);
+    detail.fillStyle(0x101014,1);
+    detail.fillRect(-halfW-4,halfH+1,halfW*2+8,3);
+    detail.fillRect(-halfW-2,-halfH-4,3,halfH);
+    detail.fillRect(halfW-1,-halfH-4,3,halfH);
+    detail.lineStyle(2,teamColor,.9);detail.lineBetween(-halfW-2,-halfH-4,halfW+1,-halfH-4);
   }else{
-    g.fillStyle(col,1);
-    g.fillRoundedRect(-30,-11,60,22,11);
-    g.fillTriangle(-30,0,-14,-18,7,-11);
-    g.fillTriangle(30,0,14,-18,-7,-11);
-    g.fillStyle(0x0b1120,1);g.fillRoundedRect(-12,-9,24,8,4);
-    g.lineStyle(2,teamColor,1);g.strokeRoundedRect(-25,-8,50,17,8);
+    body.fillStyle(col,1);
+    body.fillRoundedRect(-halfW,-halfH,halfW*2,halfH*2,11);
+    body.fillTriangle(-halfW,0,-halfW+8,-halfH-7,4,-halfH+1);
+    body.fillTriangle(halfW,0,halfW-8,-halfH-7,-4,-halfH+1);
+    detail.fillStyle(0x0b1120,.98);detail.fillRoundedRect(-12,-8,24,8,4);
+    detail.lineStyle(2,teamColor,1);detail.strokeRoundedRect(-halfW+4,-halfH+3,halfW*2-8,halfH*2-6,8);
+    detail.fillStyle(0xffffff,.30);detail.fillRect(-halfW+8,-halfH+2,halfW-14,2);
+    detail.fillStyle(0xf0f6ff,1);detail.fillRect(halfW-5,-8,4,6);detail.fillRect(halfW-5,3,4,6);
+    detail.fillStyle(0xff2d55,1);detail.fillRect(-halfW+1,-8,3,6);detail.fillRect(-halfW+1,3,3,6);
+    detail.fillStyle(teamColor,1);detail.fillRect(-halfW-6,-halfH+2,5,halfH*2-4);
+    detail.fillStyle(0x0c0c10,1);
+    detail.fillRect(-halfW-6,halfH+1,halfW*2+12,4);
+    detail.fillRect(-halfW-4,-halfH-6,4,halfH);
+    detail.fillRect(halfW,-halfH-6,4,halfH);
+    detail.lineStyle(3,teamColor,1);detail.lineBetween(-halfW-4,-halfH-6,halfW+2,-halfH-6);
+    detail.fillStyle(0x1a1a20,.9);detail.fillRect(-halfW+6,halfH-4,halfW*2-12,3);
+    detail.fillStyle(teamColor,.35);detail.fillEllipse(0,0,halfW,halfH);
+    detail.fillStyle(0xffffff,.12);detail.fillRect(-halfW+5,-halfH+5,halfW*.7,2);
   }
 
-  g.fillStyle(0x050505,1);
-  g.fillRoundedRect(-27,-10,7,10,3);g.fillRoundedRect(20,-10,7,10,3);
-  g.fillRoundedRect(-27,3,7,10,3);g.fillRoundedRect(20,3,7,10,3);
-
-  c.add(g);c.setScale(cfg.size);
+  c.add(body);c.add(detail);c.setScale(cfg.size);
   return c;
 }
 
@@ -497,28 +655,34 @@ function bindInput(){
 
 function startRaceCycle(){
   clearTimers();
-  resetRaceState();
+  if(!resetRaceState())return;
   startCountdown();
 }
 
 function resetRaceState(){
-  raceTime=180;raceStarted=false;raceOver=false;
+  raceTime=180;raceStarted=false;raceOver=false;countdownActive=false;
   AudioEngine.bpm=AudioEngine.normalBpm;
   finalSprintActive=false;
   nextEventRaceTime=150;
   eventSerial=0;
   timerText.setText('03:00').setColor('#ffcc00');
-  teams.forEach((t,i)=>{
-    const r=t.racer;
-    r.angle=(i*Math.PI)/2;r.laps=0;r.progress=0;
-    r.speed=CAR_TIERS[0].speed;r.tier=0;
-    r.hp=CAR_TIERS[0].durability;r.maxHp=r.hp;
-    r.nitroUntil=0;r.stunnedUntil=0;r.broken=false;r.airborne=false;
-    r.container.setAlpha(1).setScale(1).setRotation(0);
-    replaceCar(t,0);
-    t.energy=0;t.racePoints=0;
-  });
+  if(activeRacers.size){
+    requeueFinishers(activeRacers);
+    destroyRacers(activeRacers);
+  }
+  teams.forEach(t=>{t.energy=0;t.racePoints=0;});
+  const entries=consumeQueuedPlayers();
+  const toCreate=entries.slice(0,MAX_RACERS);
+  entries.slice(MAX_RACERS).forEach(e=>queuedPlayers.set(e.username,e));
+  if(!toCreate.length){
+    liveInteractionStarted=false;
+    showWaitingForInteraction();
+    return false;
+  }
+  toCreate.forEach(e=>activeRacers.set(e.username,makeRacer(e.username,e.teamId)));
+  positionRacersOnStartingGrid();
   updateAllHud();
+  return true;
 }
 
 function startCountdown(){
@@ -528,10 +692,14 @@ function startCountdown(){
     stroke:'#fe2c55',strokeThickness:14
   }).setOrigin(.5).setDepth(100));
 
+  countdownActive=true;
+  updateAllHud();
   const next=()=>{
     if(idx>=seq.length){
       txt.destroy();
+      countdownActive=false;
       raceStarted=true;
+      updateAllHud();
       pushEvent(`🏁 Corrida ${raceNumber} começou!`);
       startRaceTimer();
       return;
@@ -561,7 +729,7 @@ function startRaceTimer(){
       const untilEvent=Math.max(0,raceTime-nextEventRaceTime);
       if(eventCountdownText){
         eventCountdownText.setText(finalSprintActive
-          ? '⚡ FINAL SPRINT ATIVO — GIFTS +50% ENERGY'
+          ? 'FINAL SPRINT — VELOCIDADE MÁXIMA'
           : 'EVENTOS: VIEWERS + GIFTS + HOST');
       }
 
@@ -582,9 +750,8 @@ function update(){
   if(!raceStarted||raceOver)return;
   const now=scene.time.now;
 
-  teams.forEach((team,i)=>{
-    const r=team.racer;
-    if(r.broken||r.airborne)return;
+  for(const r of activeRacers.values()){
+    if(r.broken||r.airborne)continue;
     if(now<r.stunnedUntil){
       r.speed=Math.max(.001,r.speed*.94);
     }else{
@@ -594,60 +761,251 @@ function update(){
       r.angle+=r.speed;
     }
 
+    let lapped=false;
     if(r.angle>=Math.PI*2){
-      r.angle-=Math.PI*2;r.laps++;
-      pushEvent(`🏁 ${team.name} completou volta ${r.laps}`);
+      r.angle-=Math.PI*2;r.laps++;lapped=true;
+      applyTierProgression(r);
     }
 
-    const rx=222,ry=353;
-    r.container.x=360+Math.cos(r.angle)*rx;
-    r.container.y=650+Math.sin(r.angle)*ry;
+    r.container.x=TRACK.cx+Math.cos(r.angle)*TRACK.rx;
+    r.container.y=TRACK.cy+Math.sin(r.angle)*TRACK.ry+r.laneOffset;
     r.container.rotation=r.angle+Math.PI/2;
     r.progress=r.laps+r.angle/(Math.PI*2);
+
+    if(lapped&&rankOfRacer(r)<=3){
+      pushEvent(`🏁 ${r.username} completou volta ${r.laps}`);
+    }
 
     if(now<r.nitroUntil&&Math.random()<.28){
       const dot=scene.add.circle(r.container.x,r.container.y,Phaser.Math.Between(3,6),
         r.tier>=3?CYAN:0xff9f43,.7).setDepth(5);
       scene.tweens.add({targets:dot,alpha:0,scale:.2,duration:300,onComplete:()=>dot.destroy()});
     }
-  });
+  }
 
   updateAllHud();
 }
 
-function replaceCar(team,tier){
-  const r=team.racer;
-  if(r.vehicle)r.vehicle.destroy();
-  r.vehicle=drawCar(tier,team.color);
-  r.container.addAt(r.vehicle,0);
-  r.tier=tier;
-  r.maxHp=CAR_TIERS[tier].durability;
-  r.hp=r.maxHp;
-  r.speed=Math.max(r.speed,CAR_TIERS[tier].speed);
-  updateHp(r);
+function replaceCar(racer,tier){
+  if(tier===racer.tier)return;
+  const ratio=racer.maxHp>0?racer.hp/racer.maxHp:1;
+  if(racer.vehicle)racer.vehicle.destroy();
+  racer.vehicle=drawCar(tier,teams[racer.teamId].color);
+  racer.container.addAt(racer.vehicle,0);
+  racer.tier=tier;
+  racer.maxHp=CAR_TIERS[tier].durability;
+  racer.hp=Math.max(1,Math.round(racer.maxHp*ratio));
+  racer.speed=Math.max(racer.speed,CAR_TIERS[tier].speed);
+  updateHp(racer);
+}
+
+function targetTierFor(r){
+  if(r.laps>=3)return 4;
+  if(r.laps>=2)return 3;
+  if(r.laps>=1)return 2;
+  return 1;
+}
+
+function applyTierProgression(r){
+  if(!r||raceOver)return;
+  const t=targetTierFor(r);
+  if(t<=r.tier)return;
+  replaceCar(r,t);
+  burst(r.container.x,r.container.y,CAR_TIERS[t].color,10);
+  pushEvent(`⬆️ ${r.username} → ${CAR_TIERS[t].name}`);
+}
+
+function racersOfTeam(teamId){
+  const out=[];
+  for(const r of activeRacers.values())if(r.teamId===teamId)out.push(r);
+  return out;
+}
+
+function rankOfRacer(r){
+  let rank=1;
+  for(const o of activeRacers.values())if(o!==r&&o.progress>r.progress)rank++;
+  return rank;
+}
+
+function touchPlayer(username,teamId){
+  if(!username)return;
+  const p=globalParticipants.get(username);if(!p)return;
+  const tid=(teamId!=null)?teamId:p.team;
+  if(tid==null)return;
+  const now=Date.now();
+  const e=queuedPlayers.get(username);
+  if(e){e.lastActiveAt=now;if(teamId!=null)e.teamId=teamId;}
+  else queuedPlayers.set(username,{username,teamId:tid,lastActiveAt:now});
+}
+
+function hasFreshQueued(){
+  const now=Date.now();
+  for(const e of queuedPlayers.values())if(now-e.lastActiveAt<INACTIVE_QUEUE_MS)return true;
+  return false;
+}
+
+function consumeQueuedPlayers(){
+  const now=Date.now(),out=[];
+  for(const e of queuedPlayers.values()){
+    if(now-e.lastActiveAt<INACTIVE_QUEUE_MS)out.push(e);
+  }
+  queuedPlayers.clear();
+  return out;
+}
+
+function requeueFinishers(map){
+  const now=Date.now();
+  for(const r of map.values()){
+    if(!queuedPlayers.has(r.username)){
+      queuedPlayers.set(r.username,{username:r.username,teamId:r.teamId,lastActiveAt:now});
+    }
+  }
+}
+
+function destroyRacers(map){
+  for(const r of map.values()){
+    try{if(r.container)r.container.destroy();}catch(e){}
+  }
+  map.clear();
+}
+
+function positionRacersOnStartingGrid(){
+  const racers=[...activeRacers.values()];
+  const n=racers.length;
+  if(!n)return;
+  const lineCX=START_LINE.x+START_LINE.cell*START_LINE.cols/2;
+  const lineCY=START_LINE.y+START_LINE.cell*START_LINE.rows/2;
+  let START_ANGLE=Math.atan2((lineCY-TRACK.cy)/TRACK.ry,(lineCX-TRACK.cx)/TRACK.rx);
+  if(START_ANGLE<0)START_ANGLE+=Math.PI*2;
+
+  const bandMin=TRACK.outerTop+6-lineCY;
+  const bandMax=TRACK.innerTop-6-lineCY;
+  const bandC=(bandMin+bandMax)/2;
+  const bandSize=bandMax-bandMin;
+  const MARGIN=GRID_MARGIN;
+  const rowCount=Math.max(1,Math.ceil(n/4));
+  const inRow0=Math.min(4,n);
+
+  let halfWmax=0,halfHmax=0;
+  for(const r of racers){
+    halfWmax=Math.max(halfWmax,19+r.tier*3);
+    halfHmax=Math.max(halfHmax,11+r.tier*.4);
+  }
+  const glowW=halfWmax+7;
+  const glowH=halfHmax+5;
+
+  const bandFit=s=>inRow0*(glowH*2)*s+(inRow0-1)*MARGIN<=bandSize+0.01;
+  const depthOf=g=>rowCount<=1?0.10:0.10+(rowCount-1)*g;
+  const SOFT_DEPTH=1.2;
+
+  function place(sc,rg){
+    const spacing=(glowH*2)*sc+MARGIN;
+    const out=[];
+    for(let i=0;i<n;i++){
+      const row=Math.floor(i/4);
+      const col=i%4;
+      const inRow=Math.min(4,n-row*4);
+      const lane=bandC+spacing*(col-(inRow-1)/2);
+      const ang=START_ANGLE-(0.10+row*rg);
+      const norm=((ang%(Math.PI*2))+Math.PI*2)%(Math.PI*2);
+      out.push({
+        x:TRACK.cx+Math.cos(norm)*TRACK.rx,
+        y:TRACK.cy+Math.sin(norm)*TRACK.ry+lane,
+        lane,norm,row,col
+      });
+    }
+    return out;
+  }
+
+  let activeScale=0.14;
+  function countHits(pos){
+    const w=glowW*2*activeScale+6;
+    const h=glowH*2*activeScale+6;
+    let hits=0;
+    for(let a=0;a<n;a++)for(let b=a+1;b<n;b++){
+      const dx=Math.abs(pos[a].x-pos[b].x);
+      const dy=Math.abs(pos[a].y-pos[b].y);
+      if(dx<w&&dy<h)hits++;
+    }
+    return hits;
+  }
+
+  function minGapFor(sc){
+    activeScale=sc;
+    const start=Math.max(0,(glowW*2*sc+GRID_PAD_ALONG)/TRACK.rx);
+    if(countHits(place(sc,start))===0)return start;
+    let lo=start,hi=start+0.45;
+    for(let i=0;i<40;i++){
+      const mid=(lo+hi)/2;
+      if(countHits(place(sc,mid))===0)hi=mid;else lo=mid;
+    }
+    return hi;
+  }
+
+  const candidates=[];
+  for(const s of [1,.9,.8,.7,.6,.5,.45,.4,.36,.35]){
+    if(s<GRID_MIN_SCALE)continue;
+    if(!bandFit(s))continue;
+    const g=minGapFor(s);
+    const d=depthOf(g);
+    candidates.push({s,g,d,hits:countHits(place(s,g))});
+  }
+  const zero=candidates.filter(c=>c.hits===0);
+  const hard=zero.filter(c=>c.d<=GRID_MAX_DEPTH+1e-6);
+  const soft=zero.filter(c=>c.d<=SOFT_DEPTH+1e-6);
+  let pick;
+  if(hard.length)pick=hard.reduce((a,b)=>b.s>a.s?b:a);
+  else if(soft.length)pick=soft.reduce((a,b)=>b.s>a.s?b:a);
+  else if(zero.length)pick=zero.reduce((a,b)=>b.d<a.d?b:a);
+  else pick=candidates[0]||{s:GRID_MIN_SCALE,g:0,d:0.10};
+
+  const scale=pick.s;
+  const rowGap=pick.g;
+  const pos=place(scale,rowGap);
+
+  const spacing=(glowH*2)*scale+MARGIN;
+  const fontPx=n<=8?10:n<=16?9:n<=28?8:7;
+  const labelY=-18-fontPx*.4;
+
+  racers.forEach((r,i)=>{
+    const p=pos[i];
+    r.laneOffset=p.lane;
+    r.angle=p.norm;
+    r.container.x=p.x;
+    r.container.y=p.y;
+    r.container.rotation=p.norm+Math.PI/2;
+    r.container.setScale(scale);
+    r.progress=r.laps+p.norm/(Math.PI*2);
+    if(r.nameLabel){
+      r.nameLabel.setFontSize(fontPx);
+      r.nameLabel.setY(labelY);
+      r.nameLabel.setX(6);
+    }
+    if(r.teamBadge)r.teamBadge.setY(labelY);
+  });
 }
 
 function damageTeam(team,amount){
-  const r=team.racer;
-  if(r.broken)return;
-  r.hp-=Math.max(1,amount/CAR_TIERS[r.tier].armor);
-  updateHp(r);
-  if(r.hp<=0)breakCar(team);
+  for(const r of racersOfTeam(team.id)){
+    if(r.broken)continue;
+    r.hp-=Math.max(1,amount/CAR_TIERS[r.tier].armor);
+    updateHp(r);
+    if(r.hp<=0)breakCar(r);
+  }
 }
 
-function breakCar(team){
-  const r=team.racer;
+function breakCar(r){
   r.broken=true;r.speed=0;r.hp=0;updateHp(r);
-  pushEvent(`💥 ${team.name} AVARIOU!`);
+  pushEvent(`💥 ${r.username} AVARIOU!`);
   playExplosion();
   burst(r.container.x,r.container.y,0xff7a00,14);
   addTimer(scene.time.delayedCall(3200,()=>{
-    if(raceOver)return;
+    if(raceOver||!activeRacers.has(r.username))return;
     r.broken=false;
     r.hp=Math.max(14,Math.floor(r.maxHp*.42));
     r.speed=CAR_TIERS[r.tier].speed;
     updateHp(r);
-    pushEvent(`🔧 ${team.name} voltou à pista.`);
+    pushEvent(`🔧 ${r.username} voltou à pista.`);
   }));
 }
 
@@ -665,19 +1023,24 @@ function addEnergy(team,amount){
 
 function activateUltimate(team){
   team.energy=0;team.energyCooldown=true;
-  const r=team.racer;
+  const mine=racersOfTeam(team.id);
 
   if(team.id===0){
     showBanner('🔥 RED FIRE BOOST',TEAM_COLORS[0]);
     nitro(team,.015,4300);
   }else if(team.id===1){
     showBanner('❄️ BLUE ICE SHIELD',TEAM_COLORS[1]);
-    r.hp=Math.min(r.maxHp,r.hp+40);updateHp(r);
-    teams.filter(x=>x.id!==1).forEach(x=>x.racer.stunnedUntil=Math.max(x.racer.stunnedUntil,scene.time.now+1200));
+    mine.forEach(r=>{r.hp=Math.min(r.maxHp,r.hp+40);updateHp(r);});
+    const until=scene.time.now+1200;
+    for(const r of activeRacers.values()){
+      if(r.teamId!==1)r.stunnedUntil=Math.max(r.stunnedUntil,until);
+    }
   }else if(team.id===2){
     showBanner('💚 GREEN REPAIR PULSE',TEAM_COLORS[2]);
-    r.hp=r.maxHp;updateHp(r);
-    if(r.broken){r.broken=false;r.speed=CAR_TIERS[r.tier].speed;}
+    mine.forEach(r=>{
+      r.hp=r.maxHp;updateHp(r);
+      if(r.broken){r.broken=false;r.speed=CAR_TIERS[r.tier].speed;}
+    });
   }else{
     showBanner('💜 PURPLE CHAOS NITRO',TEAM_COLORS[3]);
     nitro(team,.018,3700);
@@ -688,71 +1051,82 @@ function activateUltimate(team){
 }
 
 function nitro(team,amount,duration){
-  const r=team.racer;
-  if(r.broken)return;
-  r.speed+=amount+CAR_TIERS[r.tier].nitro;
-  r.nitroUntil=Math.max(r.nitroUntil,scene.time.now+duration);
-  burst(r.container.x,r.container.y,CYAN,7);
+  const now=scene.time.now;
+  for(const r of racersOfTeam(team.id)){
+    if(r.broken)continue;
+    r.speed+=amount+CAR_TIERS[r.tier].nitro;
+    r.nitroUntil=Math.max(r.nitroUntil,now+duration);
+    burst(r.container.x,r.container.y,CYAN,7);
+  }
 }
 
 function handleGift(type,teamIndex,sender){
   if(!raceStarted||raceOver)return;
   const rule=GIFT_RULES[type];if(!rule)return;
-  const team=teams[Phaser.Math.Clamp(teamIndex??0,0,3)];
 
   ensureParticipant(sender);
-  assignParticipant(sender,team.id,false);
-  addSupport(sender,team.id,rule.points,'gift');
-  totalGifts++;team.gifts++;
+  const p=globalParticipants.get(sender);
+  totalGifts++;
+  if(p)p.gifts++;
 
-  if(rule.tier>team.racer.tier){
-    replaceCar(team,rule.tier);
-    showBanner(`⬆️ ${team.name} → ${CAR_TIERS[rule.tier].name}`,team.color);
+  const team=(p&&p.team!=null)?teams[p.team]:null;
+  if(team){
+    showBanner(`${rule.label} ${sender} → ${team.name}`,team.color);
+    const mine=racersOfTeam(team.id);
+    if(mine.length)burst(mine[0].container.x,mine[0].container.y,team.color,14);
+    else burst(360,640,team.color,14);
+    pushEvent(`${rule.label} ${sender} → ${team.name}`);
+  }else{
+    showBanner(`${rule.label} ${sender}`,PINK);
+    burst(360,640,PINK,14);
+    pushEvent(`${rule.label} ${sender} — presente para a LIVE`);
   }
-  team.racer.hp=Math.min(team.racer.maxHp,team.racer.hp+12+rule.tier*6);
-  updateHp(team.racer);
-  nitro(team,rule.boost,rule.tier>=4?3600:rule.tier>=3?2500:1500);
-  addEnergy(team,rule.energy);
-  pushEvent(`${rule.label} ${sender} → ${team.name}`);attentionStinger('gift');
-  playTone(520+rule.tier*100,.10,'square',.025);
+
+  if(!COMPLIANCE_MODE.giftsCosmeticOnly||!canAffectRace('gift')){
+    /* competitive gift effects intentionally omitted under compliance */
+  }
 }
 
-function attackGift(type,sender,targetIndex){
+function attackGift(type,sender,targetIndex,source='internal'){
   if(!raceStarted||raceOver)return;
   const rule=ATTACKS[type];if(!rule)return;
   ensureParticipant(sender);
   const p=globalParticipants.get(sender);
-  if(p&&p.team!=null)addSupport(sender,p.team,rule.points,'attack');
+  if(p&&p.team!=null)addSupport(sender,p.team,rule.points,'attack',source);
 
   let target;
   if(Number.isInteger(targetIndex))target=teams[Phaser.Math.Clamp(targetIndex,0,3)];
-  else target=[...teams].sort((a,b)=>b.racer.progress-a.racer.progress)[0];
+  else target=getTeamBoostTarget();
 
   if(type==='bomb'){
     showBanner(`💣 BOMBA → ${target.name}`,0xff3b30);
     damageTeam(target,28);
-    target.racer.stunnedUntil=scene.time.now+1400;
-    burst(target.racer.container.x,target.racer.container.y,0xff7a00,18);
+    const until=scene.time.now+1400;
+    racersOfTeam(target.id).forEach(r=>r.stunnedUntil=Math.max(r.stunnedUntil,until));
+    const hit=racersOfTeam(target.id)[0];
+    burst(hit?hit.container.x:360,hit?hit.container.y:640,0xff7a00,18);
     scene.cameras.main.shake(220,.010);
     playExplosion();
   }else if(type==='emp'){
     showBanner(`⚡ EMP CONTRA ${target.name}`,0x25f4ee);
-    teams.filter(t=>t.id!==((p&&p.team!=null)?p.team:-1)).forEach(t=>{
-      t.racer.stunnedUntil=Math.max(t.racer.stunnedUntil,scene.time.now+2200);
-    });
+    const until=scene.time.now+2200;
+    const myTeam=(p&&p.team!=null)?p.team:-1;
+    for(const r of activeRacers.values()){
+      if(r.teamId!==myTeam)r.stunnedUntil=Math.max(r.stunnedUntil,until);
+    }
     scene.cameras.main.flash(100,37,244,238,false);
     playTone(120,.35,'sawtooth',.035);
   }else if(type==='tornado'){
     showBanner('🌪️ TORNADO — TODOS VOAM!',0xbf5af2);
-    teams.forEach((t,i)=>throwCar(t,i));
+    activeRacers.forEach(r=>throwCar(r));
     scene.cameras.main.shake(420,.013);
     playJet(1.4);
   }
   pushEvent(`${rule.label} enviado por ${sender}`);attentionStinger('attack');
 }
 
-function throwCar(team,i){
-  const r=team.racer;if(r.airborne)return;
+function throwCar(r){
+  if(!r||r.airborne)return;
   r.airborne=true;
   const y0=r.container.y;
   scene.tweens.add({
@@ -764,10 +1138,16 @@ function throwCar(team,i){
     onComplete:()=>{
       r.container.setScale(1);
       r.airborne=false;
-      damageTeam(team,Phaser.Math.Between(8,16));
+      if(!activeRacers.has(r.username)){r.airborne=true;return;}
+      damageTeam(teams[r.teamId],Phaser.Math.Between(8,16));
       burst(r.container.x,r.container.y,0xd8d8df,7);
     }
   });
+}
+
+function getTeamBoostTarget(){
+  const front=[...activeRacers.values()].sort((a,b)=>b.progress-a.progress)[0];
+  return front?teams[front.teamId]:teams[0];
 }
 
 function ensureParticipant(username){
@@ -785,14 +1165,37 @@ function ensureParticipant(username){
 function assignParticipant(username,teamId,announce=true){
   ensureParticipant(username);
   const p=globalParticipants.get(username);
-  if(p.team===teamId)return;
-  if(p.team!=null)teams[p.team].members.delete(username);
+  const hadEntry=queuedPlayers.has(username);
+  const prevTeam=p.team;
+  if(prevTeam===teamId){
+    touchPlayer(username,teamId);
+    updateAllHud();
+    return;
+  }
+  if(prevTeam!=null)teams[prevTeam].members.delete(username);
   p.team=teamId;
   teams[teamId].members.add(username);
-  if(announce){pushEvent(`🏁 ${username} entrou na equipa ${TEAM_NAMES[teamId]}`);attentionStinger('join');}
+  touchPlayer(username,teamId);
+  updateAllHud();
+  if(!announce)return;
+  if(prevTeam!=null){
+    pushEvent(`🔁 ${username} mudou para a equipa ${TEAM_NAMES[teamId]}`);
+  }else if(!lobbyOpen&&(raceStarted||countdownActive||hadEntry)){
+    pushEvent(`⏳ ${username} entra na próxima corrida`);
+  }else{
+    pushEvent(`🏁 ${username} entrou na equipa ${TEAM_NAMES[teamId]}`);
+  }
 }
 
-function addSupport(username,teamId,points,kind){
+function addSupport(username,teamId,points,kind,source='internal'){
+  if(!canAffectRace(source)){
+    ensureParticipant(username);
+    const p=globalParticipants.get(username);
+    if(kind==='like')p.likes+=points;
+    if(kind==='share')p.shares++;
+    if(kind==='gift'||kind==='attack')p.gifts++;
+    return;
+  }
   ensureParticipant(username);
   assignParticipant(username,teamId,false);
   const p=globalParticipants.get(username);
@@ -808,60 +1211,19 @@ function addSupport(username,teamId,points,kind){
 
 function onComment(username,comment){
   const key=String(comment).trim().toLowerCase();
-  if(!(key in TEAM_WORDS))return;
+  if(!(key in TEAM_WORDS)){touchPlayer(username);return;}
   assignParticipant(username,TEAM_WORDS[key],true);
+  touchPlayer(username);
   updateAllHud();
 }
 
 
 function checkLikeMilestoneReward(username){
-  ensureParticipant(username);
-  const p=globalParticipants.get(username);
-  if(!p || p.team==null) return;
-
-  const reached=Math.floor(p.likes/1000);
-  if(reached<=p.likeMilestoneRewards) return;
-
-  const team=teams[p.team];
-  const rewardsToApply=reached-p.likeMilestoneRewards;
-  p.likeMilestoneRewards=reached;
-  p.likeMilestone=reached*1000;
-
-  // Apply once per crossed 1000-like threshold.
-  for(let i=0;i<rewardsToApply;i++){
-    unlockPowerCarForLikes(username,team,reached-i);
-  }
+  if(!canAffectRace('like')||!COMPLIANCE_MODE.likeMilestonesEnabled)return;
 }
 
 function unlockPowerCarForLikes(username,team,milestoneIndex){
-  const r=team.racer;
-
-  // 1000 likes = immediate HYPERCAR + long nitro burst.
-  // Further 1000-like milestones refresh the power and add extra team energy.
-  if(r.tier<4){
-    replaceCar(team,4);
-  }else{
-    r.hp=r.maxHp;
-    updateHp(r);
-  }
-
-  nitro(team,.020,6500);
-  addEnergy(team,35);
-  team.score+=250;
-  team.racePoints+=250;
-
-  const p=globalParticipants.get(username);
-  if(p) p.score+=250;
-
-  showBanner(`🔥 ${username} BATEU ${milestoneIndex*1000} LIKES — HYPERCAR!`,team.color);
-  pushEvent(`🏎️ ${username}: ${milestoneIndex*1000} likes → HYPERCAR para ${team.name}`);
-  attentionStinger('ultimate');
-  playJet(1.35);
-
-  // Special visual burst around the rewarded team car.
-  burst(r.container.x,r.container.y,team.color,22);
-  scene.cameras.main.flash(120,255,211,77,false);
-  scene.cameras.main.shake(180,.007);
+  if(!canAffectRace('like')||!COMPLIANCE_MODE.likeMilestonesEnabled)return;
 }
 
 
@@ -874,41 +1236,31 @@ function onLike(username,count=1){
     return;
   }
   totalLikes+=count;
-  p.likes+=count;p.score+=count;
-  teams[p.team].likes+=count;teams[p.team].score+=count;teams[p.team].racePoints+=count;
-  const cur=teams[p.team].supporterStats.get(username)||0;
-  teams[p.team].supporterStats.set(username,cur+count);
-  addEnergy(teams[p.team],count*.22);
-  if(count>=20)nitro(teams[p.team],.003,900);
-
-  // Every 1000 accumulated likes from this specific viewer unlocks a power car.
-  checkLikeMilestoneReward(username);
+  p.likes+=count;
+  teams[p.team].likes+=count;
+  if(!canAffectRace('like'))return;
 }
 
 function onFollow(username){
   ensureParticipant(username);
   const p=globalParticipants.get(username);
   p.follows++;
-  if(p.team==null){
-    pushEvent(`➕ ${username} seguiu — escolhe equipa!`);
-    return;
-  }
-  p.score+=20;teams[p.team].score+=20;teams[p.team].racePoints+=20;
-  addEnergy(teams[p.team],8);nitro(teams[p.team],.003,900);
-  pushEvent(`➕ FOLLOW BOOST → ${teams[p.team].name}`);
+  pushEvent(`➕ ${username} seguiu a LIVE`);
+  if(!canAffectRace('follow'))return;
 }
 
 function onShare(username){
   ensureParticipant(username);
   const p=globalParticipants.get(username);
-  if(p.team==null){
-    pushEvent(`🔁 ${username} partilhou — escolhe equipa!`);
-    return;
+
+  p.shares++;
+
+  if(p.team!=null){
+    teams[p.team].shares++;
   }
-  p.shares++;p.score+=30;
-  teams[p.team].shares++;teams[p.team].score+=30;teams[p.team].racePoints+=30;
-  addEnergy(teams[p.team],13);nitro(teams[p.team],.0045,1200);
-  pushEvent(`🔁 SHARE BOOST → ${teams[p.team].name}`);
+
+  pushEvent(`🔁 ${username} partilhou a LIVE`);
+  if(!canAffectRace('share'))return;
 }
 
 function getTopSupporter(team){
@@ -927,30 +1279,53 @@ function globalTopSupporter(){
   return best;
 }
 
+function recentParticipant(){
+  let last=null;
+  for(const p of globalParticipants.values())last=p;
+  return last;
+}
+
 function updateAllHud(){
-  const sorted=[...teams].sort((a,b)=>b.racer.progress-a.racer.progress);
-  const icons=['🥇','🥈','🥉','4️⃣'];
-  rankingText.setText(sorted.map((t,i)=>{
-    const top=getTopSupporter(t);
-    t.racer.supporterLabel.setText(top?top.username:'');
-    return `${icons[i]} ${t.name}  V${t.racer.laps}  ${CAR_TIERS[t.racer.tier].name}`;
-  }).join('\n'));
+  const sorted=[...activeRacers.values()].sort((a,b)=>b.progress-a.progress);
+  const icons=['🥇','🥈','🥉','4️⃣','5️⃣','6️⃣'];
+  rankingText.setText(sorted.length
+    ? sorted.slice(0,6).map((r,i)=>
+        `${icons[i]} ${r.username}  V${r.laps}  ${CAR_TIERS[r.tier].name}`
+      ).join('\n')
+    : '⏳ À espera de jogadores\ncomenta 1 2 3 4'
+  );
 
   teams.forEach((t,i)=>{
     window._teamHeaderTexts[i].setText(`${t.members.size} players • ${Math.round(t.energy)}%`);
   });
 
-  const top=globalTopSupporter();
-  window._topText.setText(top?`${top.username}\n${top.score} pts`:'---\n0 pts');
+  if(window._gridStatusText){
+    if(lobbyOpen){
+      const enter=Math.min(queuedPlayers.size,MAX_RACERS);
+      const extra=Math.max(0,queuedPlayers.size-MAX_RACERS);
+      window._gridStatusText.setText(`${enter} A ENTRAR • ${extra} NA FILA`);
+    }else if(raceStarted||countdownActive){
+      let waiting=0;
+      for(const u of queuedPlayers.keys())if(!activeRacers.has(u))waiting++;
+      window._gridStatusText.setText(`${activeRacers.size} CORREDORES • ${waiting} NA FILA`);
+    }else{
+      window._gridStatusText.setText('');
+    }
+  }
+
+  const recent=recentParticipant();
+  window._topText.setText(recent?recent.username:'---');
 
   if(objectiveText){
-    const leader=sorted[0];
+    const leader=sorted[0]?teams[sorted[0].teamId]:null;
     const closest=[...teams].sort((a,b)=>b.energy-a.energy)[0];
     const gap=Math.max(0,100-Math.round(closest.energy));
     objectiveText.setText(
-      finalSprintActive
-        ? `⚡ FINAL: ${leader.name} lidera • gifts carregam Ultimate +50%`
-        : `${leader.name} lidera • ${closest.name} precisa ${gap}% para ULTIMATE`
+      !leader
+        ? 'OBJETIVO: escolhe equipa (comenta 1/2/3/4)'
+        : finalSprintActive
+          ? `⚡ FINAL SPRINT: ${leader.name} lidera`
+          : `${leader.name} lidera • ${closest.name} precisa ${gap}% para ULTIMATE`
     );
   }
 }
@@ -959,8 +1334,8 @@ function updateAllHud(){
 function activateFinalSprint(){
   if(finalSprintActive||raceOver)return;
   finalSprintActive=true;
-  AudioEngine.bpm=AudioEngine.finalBpm;attentionStinger('final');showBanner('⚡ FINAL SPRINT — TUDO VALE MAIS!',0xff9f43);
-  pushEvent('⚡ FINAL SPRINT: velocidade +18% e gifts +50% energy');
+  AudioEngine.bpm=AudioEngine.finalBpm;attentionStinger('final');showBanner('FINAL SPRINT — VELOCIDADE MÁXIMA',0xff9f43);
+  pushEvent('FINAL SPRINT — VELOCIDADE MÁXIMA');
   scene.cameras.main.shake(220,.006);
   teams.forEach(t=>nitro(t,.0045,1400));
   playJet(1.15);
@@ -979,33 +1354,43 @@ function triggerLiveEvent(forcedType){
     playJet(1.05);
   }
   else if(type==='meteor'){
-    const leader=[...teams].sort((a,b)=>b.racer.progress-a.racer.progress)[0];
-    showBanner(`☄️ METEORO → ${leader.name}`,0xff7a00);
-    damageTeam(leader,18);
-    burst(leader.racer.container.x,leader.racer.container.y,0xff7a00,16);
-    pushEvent(`☄️ LIVE EVENT: meteoro atingiu ${leader.name}`);
+    const front=[...activeRacers.values()].sort((a,b)=>b.progress-a.progress)[0];
+    if(front){
+      showBanner(`☄️ METEORO → ${front.username}`,0xff7a00);
+      if(!front.broken){
+        front.hp-=Math.max(1,18/CAR_TIERS[front.tier].armor);
+        updateHp(front);
+        if(front.hp<=0)breakCar(front);
+      }
+      burst(front.container.x,front.container.y,0xff7a00,16);
+      pushEvent(`☄️ LIVE EVENT: meteoro atingiu ${front.username}`);
+    }
     scene.cameras.main.shake(180,.008);
     playExplosion();
   }
   else if(type==='repair'){
-    const weakest=[...teams].sort((a,b)=>(a.racer.hp/a.racer.maxHp)-(b.racer.hp/b.racer.maxHp))[0];
-    weakest.racer.hp=weakest.racer.maxHp;
-    updateHp(weakest.racer);
-    showBanner(`🔧 COMEBACK REPAIR → ${weakest.name}`,0x34c759);
-    addEnergy(weakest,18);
-    pushEvent(`🔧 LIVE EVENT: ${weakest.name} recebeu comeback`);
+    const weakest=[...activeRacers.values()]
+      .sort((a,b)=>(a.hp/a.maxHp)-(b.hp/b.maxHp))[0];
+    if(weakest){
+      weakest.hp=weakest.maxHp;
+      updateHp(weakest);
+      showBanner(`🔧 COMEBACK REPAIR → ${weakest.username}`,0x34c759);
+      addEnergy(teams[weakest.teamId],18);
+      pushEvent(`🔧 LIVE EVENT: ${weakest.username} recebeu comeback`);
+    }
     playTone(650,.16,'sine',.025);
   }
   else if(type==='blackout'){
     showBanner('⚡ BLACKOUT EMP!',0x25f4ee);
-    teams.forEach(t=>t.racer.stunnedUntil=Math.max(t.racer.stunnedUntil,scene.time.now+900));
+    const until=scene.time.now+900;
+    for(const r of activeRacers.values())r.stunnedUntil=Math.max(r.stunnedUntil,until);
     scene.cameras.main.flash(120,20,20,35,false);
     pushEvent('⚡ LIVE EVENT: blackout geral');
     playTone(110,.3,'sawtooth',.03);
   }
   else{
     showBanner('🌪️ CHAOS DROP!',0xbf5af2);
-    teams.forEach((t,i)=>throwCar(t,i));
+    activeRacers.forEach(r=>throwCar(r));
     pushEvent('🌪️ LIVE EVENT: Chaos Drop');
     scene.cameras.main.shake(300,.011);
     playJet(1.25);
@@ -1033,17 +1418,17 @@ function hostBoostAll(){
 }
 
 function hostUltimateLeader(){
-  const leader=[...teams].sort((a,b)=>b.racer.progress-a.racer.progress)[0];
-  leader.energy=100;
-  activateUltimate(leader);
+  const team=getTeamBoostTarget();
+  team.energy=100;
+  activateUltimate(team);
 }
 
 function hostHealAll(){
-  teams.forEach(t=>{
-    t.racer.hp=t.racer.maxHp;
-    t.racer.broken=false;
-    t.racer.speed=Math.max(t.racer.speed,CAR_TIERS[t.racer.tier].speed);
-    updateHp(t.racer);
+  activeRacers.forEach(r=>{
+    r.hp=r.maxHp;
+    r.broken=false;
+    r.speed=Math.max(r.speed,CAR_TIERS[r.tier].speed);
+    updateHp(r);
   });
   showBanner('🔧 REPARAÇÃO TOTAL',0x34c759);
 }
@@ -1065,30 +1450,33 @@ document.getElementById('host-panel')?.addEventListener('click',(e)=>{
 });
 
 function endRace(){
-  raceOver=true;raceStarted=false;
+  if(raceOver)return;
+  raceOver=true;raceStarted=false;countdownActive=false;
   clearTimers();
   timerText.setText('00:00');
 
-  const sorted=[...teams].sort((a,b)=>b.racer.progress-a.racer.progress);
-  const winner=sorted[0];winner.wins++;
+  const sorted=[...activeRacers.values()].sort((a,b)=>b.progress-a.progress);
+  const p1=sorted[0]||null;
+  const winnerTeam=p1?teams[p1.teamId]:null;
+  if(winnerTeam)winnerTeam.wins++;
   let mvp=null;
   for(const p of globalParticipants.values()){
     if(!mvp||p.score>mvp.score)mvp=p;
     p.races++;
   }
   if(mvp){mvp.mvpCount++;mvp.streak++;}
+  const recent=recentParticipant();
 
-  const top=globalTopSupporter();
   const panel=addRaceObj(scene.add.rectangle(360,646,650,500,0x050507,.97).setStrokeStyle(5,GOLD).setDepth(90));
   addRaceObj(scene.add.text(360,455,'🏆 RESULTADO DA CORRIDA',{
     fontSize:'31px',fontStyle:'bold',color:'#ffd34d',stroke:'#000',strokeThickness:6
   }).setOrigin(.5).setDepth(91));
-  addRaceObj(scene.add.text(360,535,`${winner.name} VENCEU!`,{
+  addRaceObj(scene.add.text(360,535,`${winnerTeam?winnerTeam.name:'—'} VENCEU!`,{
     fontSize:'46px',fontStyle:'bold',color:'#fff',stroke:'#fe2c55',strokeThickness:9
   }).setOrigin(.5).setDepth(91));
   addRaceObj(scene.add.text(360,615,
-    `MVP: ${mvp?mvp.username:'---'}\nTop Supporter: ${top?top.username:'---'}\nParticipantes: ${globalParticipants.size}\nLikes: ${totalLikes}   •   Gifts: ${totalGifts}`,
-    {fontSize:'20px',fontStyle:'bold',color:'#25f4ee',align:'center',lineSpacing:8}
+    `P1: ${p1?p1.username:'---'}\nEquipa vencedora: ${winnerTeam?winnerTeam.name:'---'}\nMVP: ${mvp?mvp.username:'---'}\nRecent Player: ${recent?recent.username:'---'}\nParticipantes: ${globalParticipants.size} • Likes: ${totalLikes} • Gifts: ${totalGifts}`,
+    {fontSize:'17px',fontStyle:'bold',color:'#25f4ee',align:'center',lineSpacing:7}
   ).setOrigin(.5).setDepth(91));
   addRaceObj(scene.add.text(360,785,'⚡ RESULTADOS 10s • NOVA CORRIDA NA PRÓXIMA INTERAÇÃO',{
     fontSize:'19px',fontStyle:'bold',color:'#fff'
@@ -1097,8 +1485,11 @@ function endRace(){
   AudioEngine.bpm=AudioEngine.normalBpm;attentionStinger('win');playTone(980,.35,'sawtooth',.04);
   addTimer(scene.time.delayedCall(10000,()=>{
     clearRaceObjects();
+    requeueFinishers(activeRacers);
+    destroyRacers(activeRacers);
     raceNumber++;
     liveInteractionStarted=false;
+    updateAllHud();
     showWaitingForInteraction();
   }));
 }
@@ -1616,45 +2007,24 @@ function handleRealGift(ev) {
   const { repeat, total } = getGiftValue(ev);
   const combo = updateGiftCombo(username, repeat);
   const action = classifyGiftAction(ev);
-  const teamIndex = resolveParticipantTeam(username, ev);
 
   console.log("[TikTokBridge] gift", {
     username,
     giftName: ev.giftName ?? ev.gift?.name,
     totalValue: total,
     combo,
-    action,
-    teamIndex
+    action
   });
 
-  if (action.mode === "upgrade") {
-    if (teamIndex === null) {
-      pushEvent(`🎁 ${username} enviou presente — comenta 1/2/3/4!`);
-      return;
-    }
+  const giftType = action.mode === "upgrade"
+    ? action.gift
+    : (total <= 150 ? "rocket" : "galaxy");
 
-    window.TikTokGameEvent.gift(action.gift, teamIndex, username);
+  window.TikTokGameEvent.gift(giftType, 0, username);
 
-    if (combo >= 5) {
-      addEnergy(teams[teamIndex], Math.min(25, combo * 2));
-      showBanner(`🔥 ${username} x${combo} COMBO!`, teams[teamIndex].color);
-      attentionStinger(combo>=10?'ultimate':'gift');
-    }
-    return;
+  if (combo >= 5) {
+    showBanner(`🔥 ${username} x${combo} COMBO!`, PINK);
   }
-
-  const target = Number.isInteger(ev.targetTeamIndex)
-    ? Phaser.Math.Clamp(ev.targetTeamIndex, 0, 3)
-    : undefined;
-
-  window.TikTokGameEvent.attackGift(action.attack, username, target);
-
-  const attackName = action.attack.toUpperCase();
-  showBanner(`💥 ${username} LANÇOU ${attackName}!`,
-    action.attack === "emp" ? CYAN :
-    action.attack === "tornado" ? 0xbf5af2 :
-    0xff3b30
-  );
 }
 
 
@@ -1663,6 +2033,8 @@ let liveInteractionStarted = false;
 function showWaitingForInteraction(){
   raceStarted=false;
   raceOver=false;
+  countdownActive=false;
+  lobbyOpen=false;
   timerText.setText('03:00');
   if(centerBanner){
     centerBanner.setText('💬 À ESPERA DA PRIMEIRA INTERAÇÃO')
@@ -1673,22 +2045,47 @@ function showWaitingForInteraction(){
   pushEvent('LIVE pronta — a corrida começa com a primeira interação real.');
 }
 
+function scheduleRaceStart(){
+  if(lobbyOpen||raceStarted||countdownActive||raceOver)return;
+  if(!hasFreshQueued())return;
+  lobbyOpen=true;
+  updateAllHud();
+  if(centerBanner){
+    centerBanner.setText('🏁 CORRIDA A COMEÇAR — ENTRA AGORA')
+      .setBackgroundColor('#111117').setAlpha(1).setScale(.88);
+  }
+  pushEvent('🏁 Lobby aberta — 4s para entrares na corrida');
+  lobbyTimer=addTimer(scene.time.delayedCall(LOBBY_MS,()=>{
+    lobbyTimer=null;
+    lobbyOpen=false;
+    if(raceStarted||countdownActive||raceOver)return;
+    if(!hasFreshQueued()){
+      liveInteractionStarted=false;
+      showWaitingForInteraction();
+      return;
+    }
+    if(centerBanner)centerBanner.setAlpha(0);
+    startRaceCycle();
+  }));
+}
+
 function ensureRaceStartedFromInteraction(source){
   if(liveInteractionStarted) return;
+  if(raceStarted||countdownActive||lobbyOpen) return;
+  if(!hasFreshQueued()) return;
   liveInteractionStarted=true;
-  if(centerBanner) centerBanner.setAlpha(0);
   pushEvent(`⚡ Primeira interação: ${source}`);
-  startRaceCycle();
+  scheduleRaceStart();
 }
 
 function receiveLiveEvent(rawPayload) {
   const ev = normalizeLiveEvent(rawPayload);
-  if(ev && ['comment','chat','like','follow','share','gift'].includes(ev.type)){
-    ensureRaceStartedFromInteraction(ev.type);
-    ensureAudioPlayback();
-  }
   if (!ev) return false;
   if (isDuplicateLiveEvent(ev)) return false;
+
+  if(['comment','chat','like','follow','share','gift'].includes(ev.type)){
+    ensureAudioPlayback();
+  }
 
   switch (ev.type) {
     case "comment":
@@ -1770,39 +2167,48 @@ if (LIVE_CONFIG.autoConnect) {
 
 window.TikTokGameEvent={
   comment:(username,comment)=>{
-    ensureRaceStartedFromInteraction('comment');
     ensureAudioPlayback();
     onComment(username,comment);
+    ensureRaceStartedFromInteraction('comment');
   },
   like:(username,count=1)=>{
-    ensureRaceStartedFromInteraction('like');
     ensureAudioPlayback();
+    touchPlayer(username);
     onLike(username,count);
+    ensureRaceStartedFromInteraction('like');
   },
   follow:(username)=>{
-    ensureRaceStartedFromInteraction('follow');
     ensureAudioPlayback();
+    touchPlayer(username);
     onFollow(username);
+    ensureRaceStartedFromInteraction('follow');
   },
   share:(username)=>{
-    ensureRaceStartedFromInteraction('share');
     ensureAudioPlayback();
+    touchPlayer(username);
     onShare(username);
+    ensureRaceStartedFromInteraction('share');
   },
   gift:(type,teamIndex=0,sender='@viewer')=>{
-    ensureRaceStartedFromInteraction('gift');
     ensureAudioPlayback();
+    touchPlayer(sender);
     handleGift(type,teamIndex,sender);
+    ensureRaceStartedFromInteraction('gift');
   },
   attackGift:(type,sender='@viewer',targetTeamIndex)=>{
-    ensureRaceStartedFromInteraction('gift');
     ensureAudioPlayback();
-    attackGift(type,sender,targetTeamIndex);
+    if(!COMPLIANCE_MODE.giftAttacksEnabled){
+      complianceLog('gift attack blocked');
+      return;
+    }
+    touchPlayer(sender);
+    attackGift(type,sender,targetTeamIndex,'gift');
+    ensureRaceStartedFromInteraction('gift');
   },
   selectTeam:(username,teamIndex)=>{
-    ensureRaceStartedFromInteraction('comment');
     ensureAudioPlayback();
     assignParticipant(username,Phaser.Math.Clamp(Number(teamIndex)||0,0,3),true);
+    ensureRaceStartedFromInteraction('comment');
   }
 };
 
@@ -1810,6 +2216,11 @@ console.log('[Race Arena Part 7] Hooks disponíveis:',Object.keys(window.TikTokG
 console.log('[DEBUG] 1-4 equipa | C comentário | L likes | O follow | S share | R/D/F/G gifts | B/E/T ataques | H host panel');
 console.log('[TikTokBridge] WebSocket esperado:', LIVE_CONFIG.wsUrl);
 console.log('[TikTokBridge] Também podes testar manualmente com window.TikTokLiveBridge.receive({...})');
+try{
+  initCompliance(document.documentElement.innerHTML);
+}catch(e){
+  complianceLog('audit FAIL: '+e.message);
+}
 </script>
 </body>
 </html>
