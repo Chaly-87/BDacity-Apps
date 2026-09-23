@@ -11,8 +11,8 @@ html,body{width:100%;height:100%;overflow:hidden;background:#000;font-family:Ari
 body{display:flex;align-items:center;justify-content:center}
 #shell{
   position:relative;
-  width:min(100vw,720px);
-  height:min(100vh,1280px);
+  width:min(100vw, calc(100vh * 9 / 16));
+  height:min(100vh, calc(100vw * 16 / 9));
   aspect-ratio:9/16;
   background:#050507;
   overflow:hidden;
@@ -20,9 +20,9 @@ body{display:flex;align-items:center;justify-content:center}
 #game-container{position:absolute;inset:0}
 #host-cam{
   position:absolute;
-  right:5%;
-  bottom:8%;
-  width:20%;
+  right:7%;
+  bottom:14%;
+  width:21%;
   aspect-ratio:0.82;
   border:2px solid #25f4ee;
   border-radius:10px;overflow:hidden;
