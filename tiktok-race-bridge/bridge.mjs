@@ -1,4 +1,7 @@
 import http from "node:http";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   TikTokLiveClient,
   EventType,
@@ -6,6 +9,11 @@ import {
   LikeAccumulator
 } from "piratetok-live-js";
 import { WebSocketServer, WebSocket } from "ws";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+const PUBLIC_DIR = __dirname;
 
 const USERNAME = String(process.env.TIKTOK_USERNAME || "itshugoverse")
   .replace(/^@/, "")
@@ -15,6 +23,7 @@ const PORT = Number(process.env.PORT || 10000);
 
 let tikTokConnected = false;
 let sequence = 0;
+let reconnectTimer = null;
 
 const giftTracker = new GiftStreakTracker();
 const likeAccumulator = new LikeAccumulator();
@@ -34,29 +43,57 @@ function usernameFrom(data) {
   );
 }
 
+function serveFile(res, filePath, contentType) {
+  fs.readFile(filePath, (err, data) => {
+    if (err) {
+      res.writeHead(404, {
+        "Content-Type": "text/plain; charset=utf-8"
+      });
+      res.end("Not found");
+      return;
+    }
+
+    res.writeHead(200, {
+      "Content-Type": contentType,
+      "Cache-Control": "no-store"
+    });
+
+    res.end(data);
+  });
+}
+
 const server = http.createServer((req, res) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Cache-Control", "no-store");
 
   if (req.url === "/health") {
-    res.writeHead(200, { "Content-Type": "application/json" });
+    res.writeHead(200, {
+      "Content-Type": "application/json"
+    });
+
     res.end(JSON.stringify({
       ok: true,
-      tiktokConnected: tikTokConnected,
+      tiktokConnected,
       username: USERNAME,
       websocketClients: wss.clients.size
     }));
+
     return;
   }
 
-  res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
-  res.end(
-    `HUGOVERSE TikTok Race Bridge
-TikTok: @${USERNAME}
-TikTok connected: ${tikTokConnected}
-WebSocket clients: ${wss.clients.size}
-`
-  );
+  if (req.url === "/" || req.url === "/index.html") {
+    serveFile(
+      res,
+      path.join(PUBLIC_DIR, "index.html"),
+      "text/html; charset=utf-8"
+    );
+    return;
+  }
+
+  res.writeHead(404, {
+    "Content-Type": "text/plain; charset=utf-8"
+  });
+
+  res.end("Not found");
 });
 
 const wss = new WebSocketServer({ server });
@@ -78,7 +115,7 @@ function broadcast(payload) {
 }
 
 wss.on("connection", (socket) => {
-  console.log("[GAME] Browser/game ligado ao WebSocket.");
+  console.log("[GAME] Jogo ligado ao WebSocket.");
 
   socket.send(JSON.stringify({
     id: nextId("status"),
@@ -88,22 +125,23 @@ wss.on("connection", (socket) => {
   }));
 
   socket.on("close", () => {
-    console.log("[GAME] Browser/game desligado.");
+    console.log("[GAME] Jogo desligado.");
   });
 
   socket.on("error", (err) => {
-    console.warn("[GAME] WebSocket error:", err?.message || err);
+    console.warn("[GAME] WS error:", err?.message || err);
   });
 });
 
 server.listen(PORT, "0.0.0.0", () => {
   console.log("=============================================");
-  console.log(" HUGOVERSE TikTok Race Bridge");
+  console.log(" HUGOVERSE LIVE RACE");
   console.log("=============================================");
   console.log(`TikTok: @${USERNAME}`);
-  console.log(`HTTP/WebSocket port: ${PORT}`);
+  console.log(`Port: ${PORT}`);
+  console.log("Game: /");
   console.log("Health: /health");
-  console.log("=============================================\n");
+  console.log("=============================================");
 });
 
 const client = new TikTokLiveClient(USERNAME)
@@ -128,9 +166,15 @@ client.on(EventType.like, (data) => {
 
   try {
     const stats = likeAccumulator.process(data);
+
     const count = Math.max(
       1,
-      Number(stats?.accumulatedCount ?? data?.count ?? data?.likeCount ?? 1) || 1
+      Number(
+        stats?.accumulatedCount ??
+        data?.count ??
+        data?.likeCount ??
+        1
+      ) || 1
     );
 
     broadcast({
@@ -138,8 +182,10 @@ client.on(EventType.like, (data) => {
       type: "like",
       username,
       count,
-      totalLikeCount: Number(stats?.totalLikeCount ?? data?.total ?? 0) || 0
+      totalLikeCount:
+        Number(stats?.totalLikeCount ?? data?.total ?? 0) || 0
     });
+
   } catch (err) {
     console.warn("[LIKE] fallback:", err?.message || err);
 
@@ -147,7 +193,10 @@ client.on(EventType.like, (data) => {
       id: nextId("like"),
       type: "like",
       username,
-      count: Math.max(1, Number(data?.count ?? data?.likeCount ?? 1) || 1)
+      count: Math.max(
+        1,
+        Number(data?.count ?? data?.likeCount ?? 1) || 1
+      )
     });
   }
 });
@@ -176,7 +225,11 @@ client.on(EventType.gift, (data) => {
 
     const repeatCount = Math.max(
       1,
-      Number(streak?.eventGiftCount ?? data?.repeatCount ?? 1) || 1
+      Number(
+        streak?.eventGiftCount ??
+        data?.repeatCount ??
+        1
+      ) || 1
     );
 
     const diamondCount = Math.max(
@@ -195,6 +248,7 @@ client.on(EventType.gift, (data) => {
       totalDiamonds: diamondCount * repeatCount,
       isFinal: Boolean(streak?.isFinal)
     });
+
   } catch (err) {
     console.warn("[GIFT] fallback:", err?.message || err);
 
@@ -223,16 +277,26 @@ client.on(EventType.gift, (data) => {
 
 client.on(EventType.liveEnded, () => {
   tikTokConnected = false;
+
   console.log("[TIKTOK] LIVE terminou.");
 
   broadcast({
-    id: nextId("live-ended"),
+    id: nextId("ended"),
     type: "liveEnded",
     username: USERNAME
   });
 
-  setTimeout(connectTikTok, 15000);
+  scheduleReconnect(15000);
 });
+
+function scheduleReconnect(ms) {
+  if (reconnectTimer) return;
+
+  reconnectTimer = setTimeout(() => {
+    reconnectTimer = null;
+    connectTikTok();
+  }, ms);
+}
 
 async function connectTikTok() {
   if (tikTokConnected) return;
@@ -241,9 +305,10 @@ async function connectTikTok() {
 
   try {
     await client.connect();
+
     tikTokConnected = true;
 
-    console.log(`[TIKTOK] Ligado com sucesso a @${USERNAME}.`);
+    console.log(`[TIKTOK] Ligado a @${USERNAME}.`);
 
     broadcast({
       id: nextId("status"),
@@ -251,21 +316,32 @@ async function connectTikTok() {
       connected: true,
       username: USERNAME
     });
+
   } catch (err) {
     tikTokConnected = false;
-    console.error("[TIKTOK] Ligação falhou:", err?.message || err);
-    console.log("[TIKTOK] Nova tentativa em 15 segundos.");
-    setTimeout(connectTikTok, 15000);
+
+    console.error(
+      "[TIKTOK] Ligação falhou:",
+      err?.message || err
+    );
+
+    scheduleReconnect(15000);
   }
 }
 
 process.on("SIGTERM", async () => {
-  try { await client.disconnect?.(); } catch {}
+  try {
+    await client.disconnect?.();
+  } catch {}
+
   server.close(() => process.exit(0));
 });
 
 process.on("SIGINT", async () => {
-  try { await client.disconnect?.(); } catch {}
+  try {
+    await client.disconnect?.();
+  } catch {}
+
   server.close(() => process.exit(0));
 });
 
