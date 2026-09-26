@@ -27,7 +27,6 @@
    fica em silencio (comportamento correto, nunca ingles).
    ========================================================================== */
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import crypto from "node:crypto";
@@ -41,11 +40,19 @@ const TTS_ENABLED = !["0", "false", "off", "no"].includes(
 );
 
 // Onde procurar o binário Piper e o modelo pt-PT.
+// Windows local  -> PiperPlus.Cli.exe (.NET) que já funciona.
+// Linux (Render) -> Piper oficial rhasspy/piper compilado para x86_64,
+//                   versionado em tts/linux/ (juntamente com as .so e o
+//                   espeak-ng-data). Nada de executáveis Windows no servidor.
+const IS_WINDOWS = process.platform === "win32";
+const TTS_DIR = path.join(__dirname, "tts");
+const TTS_LINUX_DIR = path.join(TTS_DIR, "linux");
+const TTS_ESPEAK_DATA = path.join(TTS_LINUX_DIR, "espeak-ng-data");
+
 const TTS_BIN_CANDIDATES = [
   process.env.TTS_PIPER_BIN,
-  path.join(__dirname, "tts", process.platform === "win32" ? "PiperPlus.Cli.exe" : "piper-plus"),
-  path.join(process.cwd(), "tts", process.platform === "win32" ? "PiperPlus.Cli.exe" : "piper-plus"),
-  path.join(os.homedir(), ".local", "share", "piper-plus", "piper-plus")
+  IS_WINDOWS ? path.join(TTS_DIR, "PiperPlus.Cli.exe") : path.join(TTS_LINUX_DIR, "piper"),
+  IS_WINDOWS ? path.join(process.cwd(), "tts", "PiperPlus.Cli.exe") : path.join(process.cwd(), "tts", "linux", "piper")
 ].filter(Boolean);
 
 const TTS_MODEL_CANDIDATES = [
@@ -83,13 +90,17 @@ function firstPtPtModel() {
 function ttsStatus() {
   const bin = firstExisting(TTS_BIN_CANDIDATES);
   const model = firstPtPtModel();
+  const espeak = firstExisting([TTS_ESPEAK_DATA]);
   return {
     enabled: TTS_ENABLED,
     ready: !!(bin && model),
+    platform: process.platform,
     bin: bin ? path.basename(bin) : null,
     model: model ? path.basename(model) : null,
     voice: model ? "pt_PT-tugão-medium" : null,
     language: model ? "pt-PT" : null,
+    engine: IS_WINDOWS ? "PiperPlus (Windows)" : "Piper rhasspy/piper (Linux x86_64)",
+    espeakData: !!espeak,
     provider: model ? "Piper TTS (MIT) — sintese neural local" : null,
     cached: ttsCache.size,
     inflight: ttsInFlight
@@ -227,17 +238,57 @@ function cultureNumber(value) {
   return String(value).replace(".", sep);
 }
 
+/* --------------------------------------------------------------------------
+   Linha de argumentos por plataforma.
+
+   As duas CLIs partilham o protocolo de E/S (JSONL no stdin -> um WAV RIFF
+   no stdout, delimitado pelo proprio cabeçalho), mas NAO a linha de
+   argumentos:
+
+   - Windows/PiperPlus (.NET): aceita --language e os numeros decimais usam
+     o separador da cultura do processo (cultureNumber).
+   - Linux/Piper (rhasspy, C++): NAO tem --language (a lingua vem do .json do
+     modelo, que tem de ser pt_PT), usa stof() do C++ — sempre ponto decimal
+     — e precisa de --espeak_data para encontrar a fonetica.
+
+   Em NENHUM dos casos passamos uma voz inglesa: se a frase nao puder ser
+   sintetizada em pt-PT o pedido falha e o jogo fica em silencio.
+   -------------------------------------------------------------------------- */
+function piperArgs(model, platform = process.platform) {
+  const windows = platform === "win32";
+  const scale = windows ? cultureNumber(1.1) : "1.1";
+  const silence = windows ? cultureNumber(0.3) : "0.3";
+  const args = ["--model", model, "--output_file", "-", "--length_scale", scale, "--sentence_silence", silence, "--json-input"];
+  if (windows) args.push("--language", "pt");
+  else args.push("--espeak_data", TTS_ESPEAK_DATA);
+  args.push("--quiet");
+  return args;
+}
+
+// No Linux as .so vivem ao lado do binario e a fonetica ao lado disso:
+// LD_LIBRARY_PATH resolve o linker, ESPEAK_DATA_PATH o espeak-ng (redundante
+// com --espeak_data, mas barato e garante a inicializacao da lib).
+function piperEnv(platform = process.platform) {
+  if (platform === "win32") return process.env;
+  return { ...process.env, LD_LIBRARY_PATH: TTS_LINUX_DIR, ESPEAK_DATA_PATH: TTS_ESPEAK_DATA };
+}
+
+function piperCwd(platform = process.platform) {
+  return platform === "win32" ? undefined : TTS_LINUX_DIR;
+}
+
 function ensurePiperWorker() {
   if (piperWorker) return piperWorker;
   const bin = firstExisting(TTS_BIN_CANDIDATES);
   const model = firstPtPtModel();
   if (!bin || !model) throw new Error("TTS indisponivel (binario ou modelo em falta)");
   piperError = "";
-  const worker = spawn(bin, [
-    "--model", model, "--language", "pt", "--json-input",
-    "--output_file", "-", "--length_scale", cultureNumber(1.1),
-    "--sentence_silence", cultureNumber(0.3), "--quiet"
-  ], { stdio: ["pipe", "pipe", "pipe"], windowsHide: true });
+  const worker = spawn(bin, piperArgs(model), {
+    stdio: ["pipe", "pipe", "pipe"],
+    windowsHide: true,
+    env: piperEnv(),
+    cwd: piperCwd()
+  });
   piperWorker = worker;
   worker.stdout.on("data", (chunk) => {
     piperBytes = Buffer.concat([piperBytes, chunk]);
@@ -303,8 +354,28 @@ async function synthWelcome(name) {
   return run;
 }
 
-function handleTtsWelcome(req, res, requestUrl) {
-  const name = requestUrl.searchParams.get("name") || "";
+/* POST /tts/welcome com corpo {"name":"Hugo"} (o GET continua a ler ?name=).
+   Corpo limitado a 2 KB e so se aceita o campo name — a frase e fixa. */
+function readNameFromBody(req) {
+  return new Promise((resolve) => {
+    const chunks = [];
+    let size = 0;
+    req.on("data", (chunk) => {
+      size += chunk.length;
+      if (size > 2048) { resolve(""); req.destroy(); return; }
+      chunks.push(chunk);
+    });
+    req.on("end", () => {
+      try { resolve(String(JSON.parse(Buffer.concat(chunks).toString("utf8"))?.name ?? "")); }
+      catch { resolve(""); }
+    });
+    req.on("error", () => resolve(""));
+  });
+}
+
+async function handleTtsWelcome(req, res, requestUrl) {
+  let name = requestUrl.searchParams.get("name") || "";
+  if (!name && req.method === "POST") name = await readNameFromBody(req);
   const phrase = welcomePhrase(name);
 
   if (!TTS_ENABLED) {
@@ -359,5 +430,6 @@ function handleTtsStatus(res) {
 
 export {
   handleTtsWelcome, handleTtsStatus, ttsStatus,
-  normalizeTtsName, welcomePhrase, applyWavHeadroom, prewarmTts, closeTts
+  normalizeTtsName, welcomePhrase, applyWavHeadroom, prewarmTts, closeTts,
+  piperArgs, piperEnv, piperCwd, TTS_LINUX_DIR, TTS_ESPEAK_DATA
 };

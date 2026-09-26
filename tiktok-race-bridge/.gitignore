@@ -4,7 +4,22 @@ public/psyfunk.mp3
 work/
 *.log
 *.err
-tts/
+
+# TTS — só o runtime de produção é versionado:
+#   tts/pt_PT-tugao-medium.onnx (+ .json)   voz pt-PT usada pelo jogo
+#   tts/linux/**                            Piper Linux x86_64 (Render)
+# Tudo o resto é lixo de desenvolvimento local: binário Windows, DLLs,
+# voz pt-BR, modelos "cpu.opt" duplicados e amostras de teste.
+tts/*.exe
+tts/*.dll
+tts/*.wav
+tts/*.ok
+tts/pt_BR*
+tts/*.cpu.opt.onnx
+tts/*.cpu.opt.onnx.json
+tts/espeak-ng
+tts/piper_phonemize
+tts/pkgconfig/
 
 # Local QA / preview artefacts (Windows Edge + puppeteer-core), not shipped.
 preview/
