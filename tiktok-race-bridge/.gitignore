@@ -1,0 +1,6 @@
+# User-supplied commercial music for local preview only.
+public/live-track.mp3
+public/psyfunk.mp3
+work/
+*.log
+tts/

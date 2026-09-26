@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: hugoverse-live-race
+    name: tiktok-race-bridge
     runtime: node
     plan: free
     buildCommand: npm install
@@ -9,3 +9,16 @@ services:
     envVars:
       - key: TIKTOK_USERNAME
         value: itshugoverse
+      # Segredo do handshake WS (definir no dashboard; opcional mas recomendado).
+      - key: BRIDGE_TOKEN
+        sync: false
+      # Origens extra permitidas, separadas por vírgula (ex: https://meujogo.com).
+      # Por omissão o servidor aceita o próprio host + localhost.
+      - key: ALLOWED_ORIGINS
+        sync: false
+      - key: MAX_WS_CLIENTS
+        value: "10"
+      - key: WS_MAX_PAYLOAD_BYTES
+        value: "65536"
+      - key: WS_UPGRADE_RATE_LIMIT
+        value: "30"
