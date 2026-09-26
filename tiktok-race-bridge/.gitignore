@@ -3,4 +3,14 @@ public/live-track.mp3
 public/psyfunk.mp3
 work/
 *.log
+*.err
 tts/
+
+# Local QA / preview artefacts (Windows Edge + puppeteer-core), not shipped.
+preview/
+browser-qa.mjs
+gift-qa.mjs
+preview-recorder.mjs
+tts-probe.mjs
+MATCH-MASTER-720x1280.png
+public/neon-kart.png

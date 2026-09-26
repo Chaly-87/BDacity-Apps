@@ -1,11 +1,11 @@
 (function(root){
   'use strict';
   const TRACK_PATH=Object.freeze({
-    cx:360,cy:369,rx:264,ry:222,roadHalfWidth:52,kartHalfWidth:11,kartHalfLength:17,safetyMargin:5,
+    cx:360,cy:369,rx:264,ry:222,roadHalfWidth:52,kartHalfWidth:10,kartHalfLength:15,safetyMargin:5,
     sampleCount:256,startProgress:.25
   });
   const FINISH_EXIT_PATH=Object.freeze([
-    Object.freeze({progress:.25,lane:0}),Object.freeze({progress:.265,lane:-18}),Object.freeze({progress:.285,lane:-29})
+    Object.freeze({progress:.004,lane:0}),Object.freeze({progress:.013,lane:-.42}),Object.freeze({progress:.02,lane:-.78})
   ]);
   const clamp=(v,a,b)=>Math.min(Math.max(v,a),b);
   const wrap=v=>((Number(v)||0)%1+1)%1;
@@ -45,14 +45,29 @@
   }
   function startGrid(count=16){
     return Array.from({length:Math.min(16,Math.max(0,count))},(_,i)=>{
-      const row=Math.floor(i/2),side=i%2===0?-.42:.42,progress=-row*.019;
-      return {...pointAt(progress,side),slot:i+1,progress:wrap(progress),lane:side};
+      const row=Math.floor(i/2),side=i%2===0?-.45:.45,progress=-row*.027-.0135;
+      return {...pointAt(progress,side),slot:i+1,progress,lane:side};
     });
   }
   function parkingPoint(position){
     const index=Math.max(0,(Number(position)||1)-1),row=Math.floor(index/4),col=index%4;
-    const progress=.276+row*.012,lane=-.78+col*.52;
-    return {...pointAt(progress,lane),position:index+1};
+    const progress=.02+row*.014,lane=-.78+col*.52;
+    return {...pointAt(progress,lane),lane,progress:wrap(progress),position:index+1};
+  }
+  function signedLateral(progress,point){
+    const c=centerPoint(progress);
+    return (point.x-c.x)*c.nx+(point.y-c.y)*c.ny;
+  }
+  function hitboxAudit(progress,lane){
+    const corners=kartCorners(progress,lane);
+    let outward=-Infinity,inward=-Infinity,finite=true;
+    for(const corner of corners){
+      if(!Number.isFinite(corner.x)||!Number.isFinite(corner.y)){finite=false;continue;}
+      const lateral=signedLateral(progress,corner);
+      inward=Math.max(inward,lateral);
+      outward=Math.max(outward,-lateral);
+    }
+    return {finite,outward,inward,grassClearance:TRACK_PATH.roadHalfWidth-outward,infieldClearance:TRACK_PATH.roadHalfWidth-inward};
   }
   function roadMesh(samples=TRACK_PATH.sampleCount){
     const center=[],left=[],right=[];
@@ -70,16 +85,29 @@
       for(let step=0;step<samplesPerLap;step+=1){
         for(let racer=0;racer<racers;racer+=1){
           const progress=(lap+(step+racer*.37)/samplesPerLap),lane=((racer%3)-1)*.78;
-          const clearance=roadClearance(progress,lane);
-          report.roadSamples+=1;report.minRoadClearance=Math.min(report.minRoadClearance,clearance);
-          if(clearance<0){report.roadViolations+=1;report.grassHits+=1;}
-          const corners=kartCorners(progress,lane);
-          if(corners.some(p=>!Number.isFinite(p.x)||!Number.isFinite(p.y))){report.roadViolations+=1;report.boxHits+=1;}
+          const audit=hitboxAudit(progress,lane);
+          report.roadSamples+=1;
+          if(!audit.finite){report.roadViolations+=1;report.boxHits+=1;continue;}
+          report.minRoadClearance=Math.min(report.minRoadClearance,Math.min(audit.grassClearance,audit.infieldClearance));
+          if(audit.grassClearance<0){report.roadViolations+=1;report.grassHits+=1;}
+          if(audit.infieldClearance<0){report.roadViolations+=1;report.infieldHits+=1;}
         }
       }
+    }
+    const staticCases=[];
+    startGrid(16).forEach(s=>staticCases.push([s.progress,s.lane]));
+    for(let pos=1;pos<=16;pos+=1){const p=parkingPoint(pos);staticCases.push([p.progress,p.lane]);}
+    FINISH_EXIT_PATH.forEach(w=>staticCases.push([w.progress,w.lane]));
+    for(const [progress,lane] of staticCases){
+      const audit=hitboxAudit(progress,lane);
+      report.roadSamples+=1;
+      if(!audit.finite){report.roadViolations+=1;report.boxHits+=1;continue;}
+      report.minRoadClearance=Math.min(report.minRoadClearance,Math.min(audit.grassClearance,audit.infieldClearance));
+      if(audit.grassClearance<0){report.roadViolations+=1;report.grassHits+=1;}
+      if(audit.infieldClearance<0){report.roadViolations+=1;report.infieldHits+=1;}
     }
     report.minRoadClearance=Number(report.minRoadClearance.toFixed(3));
     return report;
   }
-  root.TrackGeometry=Object.freeze({TRACK_PATH,FINISH_EXIT_PATH,centerPoint,maxLaneOffset,safeLaneOffset,pointAt,kartCorners,roadClearance,startGrid,parkingPoint,roadMesh,runRoadQA});
+  root.TrackGeometry=Object.freeze({TRACK_PATH,FINISH_EXIT_PATH,centerPoint,maxLaneOffset,safeLaneOffset,pointAt,kartCorners,roadClearance,signedLateral,hitboxAudit,startGrid,parkingPoint,roadMesh,runRoadQA});
 })(typeof window!=='undefined'?window:globalThis);

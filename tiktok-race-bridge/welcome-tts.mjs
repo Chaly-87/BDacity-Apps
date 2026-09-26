@@ -219,6 +219,14 @@ function readPiperWavs() {
   }
 }
 
+/* A CLI e .NET: aceita o separador decimal da CULTURA do processo. Em pt-PT
+   "1.1" levanta erro e a CLI despeja o usage para o STDOUT, o que faz o parser
+   RIFF falhar. Formatacao com o separador real da runtime. */
+function cultureNumber(value) {
+  const sep = new Intl.NumberFormat().formatToParts(1.1).find((p) => p.type === "decimal")?.value ?? ".";
+  return String(value).replace(".", sep);
+}
+
 function ensurePiperWorker() {
   if (piperWorker) return piperWorker;
   const bin = firstExisting(TTS_BIN_CANDIDATES);
@@ -227,8 +235,8 @@ function ensurePiperWorker() {
   piperError = "";
   const worker = spawn(bin, [
     "--model", model, "--language", "pt", "--json-input",
-    "--output_file", "-", "--length_scale", "1.1",
-    "--sentence_silence", "0.3", "--quiet"
+    "--output_file", "-", "--length_scale", cultureNumber(1.1),
+    "--sentence_silence", cultureNumber(0.3), "--quiet"
   ], { stdio: ["pipe", "pipe", "pipe"], windowsHide: true });
   piperWorker = worker;
   worker.stdout.on("data", (chunk) => {

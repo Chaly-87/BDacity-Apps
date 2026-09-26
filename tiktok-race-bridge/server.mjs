@@ -343,6 +343,7 @@ const server = http.createServer((req, res) => {
     "/assets/host-avatar.mp4": ["public/host-avatar.mp4", "video/mp4"],
     "/assets/host-poster.jpg": ["public/host-poster.jpg", "image/jpeg"],
     "/assets/psyfunk.mp3": ["public/psyfunk.mp3", "audio/mpeg"],
+    "/assets/official-track.mp3": ["public/official-track.mp3", "audio/mpeg"],
     "/assets/neon-rush-official.mp3": ["public/neon-rush-official.mp3", "audio/mpeg"],
     "/neon-rush.css": ["neon-rush.css", "text/css; charset=utf-8"]
   };

@@ -13,6 +13,7 @@
   const GIFT_RULES = Object.freeze({
     rose: Object.freeze({
       id: 'rose',
+      minValue: 1,
       name: 'ROSE',
       valueTier: 1,
       effect: 'turbo',
@@ -25,6 +26,7 @@
     }),
     donut: Object.freeze({
       id: 'donut',
+      minValue: 5,
       name: 'DONUT',
       valueTier: 2,
       effect: 'slow',
@@ -37,6 +39,7 @@
     }),
     rocket: Object.freeze({
       id: 'rocket',
+      minValue: 20,
       name: 'ROCKET',
       valueTier: 3,
       effect: 'boost',
@@ -49,6 +52,7 @@
     }),
     bomb: Object.freeze({
       id: 'bomb',
+      minValue: 50,
       name: 'BOMB',
       valueTier: 4,
       effect: 'hazard',
@@ -61,6 +65,7 @@
     }),
     emp: Object.freeze({
       id: 'emp',
+      minValue: 100,
       name: 'EMP',
       valueTier: 4,
       effect: 'shock',
@@ -73,6 +78,7 @@
     }),
     tornado: Object.freeze({
       id: 'tornado',
+      minValue: 150,
       name: 'TORNADO',
       valueTier: 4,
       effect: 'slow',
@@ -85,6 +91,7 @@
     }),
     galaxy: Object.freeze({
       id: 'galaxy',
+      minValue: 500,
       name: 'GALAXY',
       valueTier: 5,
       effect: 'galaxy',
@@ -219,7 +226,7 @@
     let chosen = 'rose';
     for (const ruleId of VALUE_ORDER) {
       const rule = GIFT_RULES[ruleId];
-      if (numeric >= (rule.minValue ?? 1)) {
+      if (Number.isFinite(rule.minValue) && numeric >= rule.minValue) {
         chosen = ruleId;
       }
     }
