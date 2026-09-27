@@ -313,3 +313,64 @@ test('21. racerKey: userId > uniqueId > username fallback seguro', () => {
   assert.equal(R.racerKey(null), '');
   assert.equal(R.racerKey({ userId: '  ', username: '@Ana' }), 'ana');
 });
+
+// ---------------------------------------------------------------------------
+// NOVA REGRA: QUALQUER interação real = 1 racer (entrada imediata)
+// ---------------------------------------------------------------------------
+test('22. entrada: 1 like cria racer; likes/comment/gift extra = SEMPRE 1', () => {
+  const state = freshState();
+  const admit = (username, userId) => R.admitRacer({
+    racers: state.racers, queue: state.queue,
+    user: { username, userId }, team: 1, maxRacers: 16,
+    makeRacer: (i, n, t, ident) => ({ userId: R.racerKey(ident ?? userId ?? username), username: n, teamId: t })
+  });
+  const already = (u) => !!R.findRacerForUser(state.racers, u) || state.queue.has(R.racerKey(u ?? {}));
+
+  // 1.º like → 1 racer
+  assert.equal(admit('@HUGO', 'hugo').admitted, true);
+  assert.equal(state.racers.length, 1);
+  // mais likes → continua 1
+  assert.equal(already({ userId: 'hugo', username: '@HUGO' }), true);
+  assert.equal(state.racers.length, 1);
+  // comment depois → continua 1
+  assert.equal(admit('@HUGO', 'hugo').admitted, false);
+  assert.equal(state.racers.length, 1);
+  // gift depois → continua 1
+  assert.equal(admit('@HUGO', 'hugo').admitted, false);
+  assert.equal(state.racers.length, 1);
+  assert.equal(R.countDuplicateRacers(state.racers), 0);
+});
+
+test('23. gift como 1.ª interação cria o racer do próprio user', () => {
+  const state = freshState();
+  const outcome = R.admitRacer({
+    racers: state.racers, queue: state.queue,
+    user: { username: '@NOVO', userId: 'novo' }, team: 1, maxRacers: 16,
+    makeRacer: (i, n, t, ident) => ({ userId: R.racerKey(ident), username: n, teamId: t })
+  });
+  assert.equal(outcome.admitted, true);
+  assert.equal(outcome.queued, false);
+  assert.equal(outcome.racer.userId, 'novo', 'racer associado à identidade real');
+  assert.equal(state.racers.length, 1);
+  assert.equal(R.countDuplicateRacers(state.racers), 0);
+});
+
+test('24. 16 utilizadores interagentes = 16 racers; 17.º = queue', () => {
+  const state = freshState();
+  const admit = (username, userId) => R.admitRacer({
+    racers: state.racers, queue: state.queue,
+    user: { username, userId }, team: 1, maxRacers: 16,
+    makeRacer: (i, n, t, ident) => ({ userId: R.racerKey(ident), username: n, teamId: t })
+  });
+  for (let i = 1; i <= 16; i += 1) {
+    const o = admit(`@U${i}`, `u${i}`);
+    assert.equal(o.admitted, true);
+    assert.equal(o.queued, false);
+  }
+  assert.equal(state.racers.length, 16);
+  const q = admit('@U17', 'u17');
+  assert.equal(q.queued, true);
+  assert.equal(state.racers.length, 16);
+  assert.equal(state.queue.size, 1);
+  assert.equal(R.countDuplicateRacers(state.racers), 0);
+});

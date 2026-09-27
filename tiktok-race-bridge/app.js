@@ -261,7 +261,15 @@
   function frame(now){const dt=Math.min(.05,(now-state.lastNow)/1000);state.lastNow=now;tickRace(dt,now);clearEvent(now);draw(now);state.frameCount+=1;if(now-state.lastFpsAt>=1000){state.fps=state.frameCount*1000/(now-state.lastFpsAt);state.fpsSamples.push(state.fps);if(state.fpsSamples.length>30)state.fpsSamples.shift();state.frameCount=0;state.lastFpsAt=now;renderHud();}requestAnimationFrame(frame);}
   function gift(id,user='@HUGO',source='demo',identity=null){
     const rule=RL.GIFT_RULES[id];if(!rule)return null;
-    const ranked=RL.rankRacers(state.racers);const sender=RL.findRacerForUser(state.racers,identity||user)||ranked[ranked.length-1]||state.racers[0];
+    // NOVA REGRA: gift de quem não tem racer cria PRIMEIRO o racer e aplica
+    // o efeito a esse mesmo racer (1 user = 1 racer).
+    let sender=RL.findRacerForUser(state.racers,identity||user);
+    if(!sender&&source==='live'&&!state.queue.has(RL.racerKey(identity||user))){
+      const outcome=RL.admitRacer({racers:state.racers,queue:state.queue,user:identity||user,team:1,maxRacers:MAX_RACERS,makeRacer});
+      sender=outcome.racer||null;
+      if(outcome.admitted&&!outcome.queued)showEvent(String(identity?.username||user),'GIFT','NOVO PILOTO INSCRITO','join',2200);
+    }
+    const ranked=RL.rankRacers(state.racers);sender=sender||ranked[ranked.length-1]||state.racers[0];
     const now=performance.now();
     const applied=RL.applyGiftEffect({mode:source==='demo'?RL.MODES.FULL_INTERACTION_DEMO:state.mode,gift:rule,source:'gift',target:sender?.userId,now,cooldownMap:state.giftCooldowns});
     const effectLabel=applied.blocked?'EFEITO VISUAL':EFFECT_LABELS[rule.effect];
@@ -275,7 +283,13 @@
     if(rule.effect==='shock'||rule.effect==='hazard'||rule.effect==='slow'){ranked.filter(r=>r!==sender&&!r.finished).slice(0,5).forEach(r=>r.shockUntil=now+rule.duration);}
     if(rule.effect==='galaxy')ranked.filter(r=>r!==sender&&!r.finished).forEach(r=>r.shockUntil=now+rule.duration);
     return applied;
-  }    function onLike(user,count){const display=typeof user==='string'?user:String(user?.username||user?.uniqueId||'@viewer'),id=RL.racerKey(user),previous=Number(state.likesByUser[id]||0),total=RL.recordLike({likesByUser:state.likesByUser,userId:id,amount:count}),milestones=RL.crossedLikeMilestones(previous,count,1000);if(milestones.includes(1000)){const outcome=RL.admitRacer({racers:state.racers,queue:state.queue,user,team:1,maxRacers:MAX_RACERS,makeRacer});if(outcome.admitted){showEvent(display,'1000 LIKES',outcome.queued?'PILOTO NA FILA':'NOVO PILOTO','likes');}}else if(milestones.length){const racer=RL.findRacerForUser(state.racers,user);if(racer)racer.boostUntil=performance.now()+1800;showEvent(display,`${total} LIKES`,'BOOST','likes');}}
+  }    function onLike(user,count){const display=typeof user==='string'?user:String(user?.username||user?.uniqueId||'@viewer'),id=RL.racerKey(user),previous=Number(state.likesByUser[id]||0),total=RL.recordLike({likesByUser:state.likesByUser,userId:id,amount:count}),milestones=RL.crossedLikeMilestones(previous,count,1000);
+    // NOVA REGRA: o 1.º LIKE REAL de quem não tem racer cria/queue um racer.
+    let firstRacerViaLike=false;
+    if(previous===0&&!RL.findRacerForUser(state.racers,user)&&!state.queue.has(RL.racerKey(user))){const outcome=RL.admitRacer({racers:state.racers,queue:state.queue,user,team:1,maxRacers:MAX_RACERS,makeRacer});if(outcome.admitted){firstRacerViaLike=true;showEvent(display,'LIKES',outcome.queued?'PILOTO NA FILA':'NOVO PILOTO','likes');}}
+    // 1000 likes = BÓNUS (boost) — nunca cria 2.º racer.
+    if(!firstRacerViaLike&&milestones.length){const racer=RL.findRacerForUser(state.racers,user);if(racer){racer.boostUntil=performance.now()+1800;showEvent(display,`${total} LIKES`,'BÓNUS VELOCIDADE','likes');}}
+    maybeStartRealRace();}
   function showResults(){if(state.phase==='results')return;state.phase='results';shell.classList.remove('sprint','galaxy');setMusicLevel(MUSIC_LEVELS.results);const ranked=RL.rankRacers(state.racers);const box=el('results');box.hidden=false;box.innerHTML=`<h2>RESULTADOS</h2><div class="podium">${ranked.slice(0,3).map((r,i)=>`<div style="--team:${TEAM_DEFS[r.teamId].color}">P${i+1}<br>${r.username}<br><small>${TEAM_DEFS[r.teamId].key.toUpperCase()}</small></div>`).join('')}</div><p>PRÓXIMA CORRIDA EM BREVE</p>`;setRaceCopy('RESULTADOS FINAIS','TOP 10 CONFIRMADO');}
   function resetFromResults(){el('results').hidden=true;shell.classList.remove('sprint','galaxy');if(DEMO_MODE){startRace(8);return;}state.racers=[];state.queue.clear();state.finishCount=0;state.firstFinishAt=null;state.remaining=RACE_TIME;state.phase='waiting';setMusicLevel(MUSIC_LEVELS.waiting);setWaitingState();}
   function finishLeader(){const r=RL.rankRacers(state.racers).find(x=>!x.finished);if(!r)return;if(state.phase!=='race'){state.phase='race';state.raceStartedAt=performance.now();}r.completedLaps=TOTAL_LAPS-1;r.trackProgress=.995;r.totalProgress=(TOTAL_LAPS-1)*RL.TRACK_LENGTH+995;r.baseSpeed=.2;}
@@ -292,12 +306,61 @@
   }
   function maybeStartRealRace(){if(!DEMO_MODE&&state.phase==='waiting'&&state.racers.length>=2)beginRealRace();}
   function browserPtPtWelcome(name){return new Promise(resolve=>{const voices=window.speechSynthesis?.getVoices?.()||[],voice=voices.find(v=>String(v.lang).toLowerCase().startsWith('pt-pt'));if(!voice){resolve(false);return;}const utter=new SpeechSynthesisUtterance(`Bem-vindo, ${String(name).replace(/^@/,'')}.`);utter.lang='pt-PT';utter.voice=voice;utter.onend=()=>resolve(true);utter.onerror=()=>resolve(false);window.speechSynthesis.speak(utter);});}
-  async function speakWelcome(name){if(!state.audio||state.ttsBusy)return;state.ttsBusy=true;let spoken=false;state.ttsLast={source:'silence',lang:null};setMusicLevel(.22);try{const res=await fetch(`/tts/welcome?name=${encodeURIComponent(String(name).replace(/^@/,''))}`);if(res.ok){const blob=await res.blob(),url=URL.createObjectURL(blob),audio=new Audio(url);await audio.play();await new Promise(resolve=>{audio.onended=resolve;audio.onerror=resolve;});URL.revokeObjectURL(url);spoken=true;state.ttsLast={source:'server',lang:res.headers.get('X-TTS-Language')||'pt-PT'};}if(!spoken){const ok=await browserPtPtWelcome(name);state.ttsLast=ok?{source:'browser',lang:'pt-PT'}:{source:'silence',lang:null};}}catch{const ok=await browserPtPtWelcome(name);state.ttsLast=ok?{source:'browser',lang:'pt-PT'}:{source:'silence',lang:null};}finally{setMusicLevel(phaseLevel());state.ttsBusy=false;}}
-  function onLiveEvent(ev){const type=String(ev?.type||'');const user=String(ev?.username||'@VIEWER').slice(0,24);if(type==='comment'){const map={1:0,red:0,2:1,blue:1,3:2,green:2,4:3,purple:3};const key=String(ev.comment||'').trim().toLowerCase();if(Object.hasOwn(map,key)){const outcome=RL.admitRacer({racers:state.racers,queue:state.queue,user:{userId:ev?.userId??null,uniqueId:ev?.uniqueId??null,username:user},team:map[key],maxRacers:MAX_RACERS,makeRacer});if(outcome.admitted){const joined=!outcome.queued;showEvent(user,'COMENTÁRIO',joined?'PILOTO INSCRITO':'PILOTO NA FILA','join',2600,`${user} COMENTOU ${String(ev.comment||'').toUpperCase()}`,joined?'NA CORRIDA':'NA FILA');maybeStartRealRace();}}}else if(type==='like')onLike({userId:ev?.userId??null,uniqueId:ev?.uniqueId??null,username:user},Number(ev.count)||1);else if(type==='gift'){const key=String(ev.giftName||'rose').toLowerCase();const id=Object.hasOwn(RL.GIFT_RULES,key)?key:RL.giftFor(Number(ev.totalDiamonds)||1).id;gift(id,user,'live',{userId:ev?.userId??null,uniqueId:ev?.uniqueId??null,username:user});}else if(type==='join'){showEvent(user,'ENTROU','BEM-VINDO','join',1600);void speakWelcome(user);}else if(type==='viewers'){setViewerCount(ev.count);}}
+  // --- WELCOME BOT: fila FIFO, dedupe por sessão, telemetria de reprodução ---
+  const welcomeState={queue:[],seen:new Set(),busy:false,blocked:null,qa:{joinReceived:false,ttsRequested:false,ttsHttp:null,lang:null,playResolved:null,currentTime:0,volume:0,musicDucked:false,musicRestored:false,autoplayBlocked:false,source:null}};
+  function rampMusic(to,ms=800){const from=music.volume,start=performance.now();const step=(t)=>{const k=Math.min(1,(t-start)/ms);setMusicLevel(from+(to-from)*k);if(k<1)requestAnimationFrame(step);};requestAnimationFrame(step);}
+  function requestWelcome(name){
+    const key=RL.racerKey(name||'');if(!key)return;
+    if(welcomeState.seen.has(key))return;           // nunca repetir na sessão
+    welcomeState.seen.add(key);
+    if(welcomeState.queue.length>=8)welcomeState.queue.shift(); // fila máxima
+    welcomeState.queue.push(String(name));
+    pumpWelcome();
+  }
+  function pumpWelcome(){
+    if(welcomeState.busy)return;                    // nunca duas vozes ao mesmo tempo
+    const next=welcomeState.queue.shift();
+    if(!next)return;
+    welcomeState.busy=true;
+    void speakWelcome(next).finally(()=>{welcomeState.busy=false;pumpWelcome();});
+  }
+  async function speakWelcome(name){
+    const qa=welcomeState.qa;
+    const display=String(name||'').replace(/^@/,'');
+    qa.ttsRequested=true;qa.playResolved=null;qa.currentTime=0;
+    const musicPlaying=!music.paused&&state.audio;
+    if(musicPlaying){qa.musicDucked=true;rampMusic(.22,300);}
+    let spoken=false;
+    try{
+      const res=await fetch(`/tts/welcome?name=${encodeURIComponent(display)}`);
+      qa.ttsHttp=res.status;qa.lang=res.headers.get('X-TTS-Language');
+      if(res.ok){
+        const blob=await res.blob(),url=URL.createObjectURL(blob),audio=new Audio(url);
+        audio.volume=1;qa.volume=audio.volume;
+        try{await audio.play();qa.playResolved=true;}
+        catch(err){qa.playResolved=false;qa.autoplayBlocked=err&&err.name==='NotAllowedError';throw err;}
+        await new Promise((resolve)=>{audio.onended=resolve;audio.onerror=resolve;});
+        qa.currentTime=audio.currentTime;
+        URL.revokeObjectURL(url);
+        if(qa.currentTime>0){spoken=true;qa.source='server';welcomeState.blocked=null;}
+      }
+    }catch(err){
+      // Sem gesto do host o browser pode bloquear play(): guardar para tocar
+      // após SOM ON (nunca fingir que falou). Fallback browser: SÓ voz pt-PT.
+      if(welcomeState.qa.autoplayBlocked){welcomeState.blocked=String(name);}
+      else{const ok=await browserPtPtWelcome(name);if(ok){spoken=true;qa.source='browser';qa.lang='pt-PT';}}
+    }
+    if(!spoken&&!qa.autoplayBlocked){qa.source=qa.source||'silence';}
+    if(musicPlaying){rampMusic(phaseLevel(),900);qa.musicRestored=true;}
+  }
+  function onLiveEvent(ev){const type=String(ev?.type||'');const user=String(ev?.username||'@VIEWER').slice(0,24);if(type==='comment'){const map={1:0,red:0,2:1,blue:1,3:2,green:2,4:3,purple:3};const key=String(ev.comment||'').trim().toLowerCase();if(Object.hasOwn(map,key)){const outcome=RL.admitRacer({racers:state.racers,queue:state.queue,user:{userId:ev?.userId??null,uniqueId:ev?.uniqueId??null,username:user},team:map[key],maxRacers:MAX_RACERS,makeRacer});if(outcome.admitted){const joined=!outcome.queued;showEvent(user,'COMENTÁRIO',joined?'PILOTO INSCRITO':'PILOTO NA FILA','join',2600,`${user} COMENTOU ${String(ev.comment||'').toUpperCase()}`,joined?'NA CORRIDA':'NA FILA');maybeStartRealRace();}}}else if(type==='like')onLike({userId:ev?.userId??null,uniqueId:ev?.uniqueId??null,username:user},Number(ev.count)||1);else if(type==='gift'){const key=String(ev.giftName||'rose').toLowerCase();const id=Object.hasOwn(RL.GIFT_RULES,key)?key:RL.giftFor(Number(ev.totalDiamonds)||1).id;gift(id,user,'live',{userId:ev?.userId??null,uniqueId:ev?.uniqueId??null,username:user});}else if(type==='join'){welcomeState.qa.joinReceived=true;showEvent(user,'ENTROU','BEM-VINDO','join',1600);requestWelcome(user);}else if(type==='follow'||type==='share'){const outcome=RL.admitRacer({racers:state.racers,queue:state.queue,user:{userId:ev?.userId??null,uniqueId:ev?.uniqueId??null,username:user},team:1,maxRacers:MAX_RACERS,makeRacer});if(outcome.admitted){showEvent(user,type==='follow'?'SEGUIU':'PARTILHOU',outcome.queued?'PILOTO NA FILA':'NOVO PILOTO','join',2200);maybeStartRealRace();}}else if(type==='viewers'){setViewerCount(ev.count);}}
   function connectBridge(){if(location.protocol==='file:')return;const proto=location.protocol==='https:'?'wss':'ws';try{const ws=new WebSocket(`${proto}://${location.host}/ws`);state.ws=ws;ws.onopen=()=>{el('bridge-status').textContent='LIVE LIGADA';};ws.onmessage=e=>{try{onLiveEvent(JSON.parse(e.data));}catch{}};ws.onclose=()=>{el('bridge-status').textContent='MODO LOCAL';state.wsRetry=window.setTimeout(connectBridge,3500);};ws.onerror=()=>{};}catch{el('bridge-status').textContent='MODO LOCAL';}}
   function phaseLevel(){return state.phase==='race'?MUSIC_LEVELS.race:state.phase==='results'?MUSIC_LEVELS.results:MUSIC_LEVELS.waiting;}
   function setMusicLevel(v){music.volume=Math.max(0,Math.min(1,Number(v)||0));}
-  async function toggleAudio(){state.audio=!state.audio;const btn=el('audio-toggle');btn.setAttribute('aria-pressed',String(state.audio));btn.textContent=state.audio?'SOM ON':'SOM OFF';if(state.audio){hostVideo.muted=true;if(music.src){try{setMusicLevel(phaseLevel());await music.play();}catch{}}}else{music.pause();}}
+  async function toggleAudio(){state.audio=!state.audio;const btn=el('audio-toggle');btn.setAttribute('aria-pressed',String(state.audio));btn.textContent=state.audio?'SOM ON':'SOM OFF';if(state.audio){hostVideo.muted=true;if(music.src){try{setMusicLevel(phaseLevel());await music.play();}catch{}}
+    // SOM ON desbloqueia TTS: tocar welcome que ficou pendente por autoplay.
+    if(welcomeState.blocked){const n=welcomeState.blocked;welcomeState.blocked=null;welcomeState.seen.delete(RL.racerKey(n));requestWelcome(n);}
+  }else{music.pause();}}
   function setupMedia(){hostVideo.src='/assets/host-avatar.mp4';hostVideo.play().catch(()=>{});music.preload='auto';music.src=MUSIC_SRC;music.load();setMusicLevel(MUSIC_LEVELS.waiting);el('audio-toggle').addEventListener('click',toggleAudio);}
   function qaAction(action){if(action!=='results'&&state.phase==='results'){el('results').hidden=true;}if(action==='grid')prepareGrid(16);else if(action==='race8')startRace(8);else if(action==='race16'){startRace(16);window.setTimeout(differentLaps,1100);}else if(action==='rose')gift('rose');else if(action==='premium')gift('emp');else if(action==='galaxy')gift('galaxy');else if(action==='likes')onLike('@NOVO_PILOTO',1000);else if(action==='finish')finishLeader();else if(action==='results')showResults();}
   document.querySelectorAll('[data-qa]').forEach(b=>b.addEventListener('click',()=>qaAction(b.dataset.qa)));
@@ -325,6 +388,7 @@
     differentLaps:()=>differentLaps(),
     results:()=>showResults(),
     tts:()=>state.ttsLast||null,
+    welcomeQA:()=>({seen:[...welcomeState.seen],queue:[...welcomeState.queue],busy:welcomeState.busy,blocked:welcomeState.blocked,qa:{...welcomeState.qa}}),
     shellRect:()=>{const a=document.getElementById('gift-actions').getBoundingClientRect(),r=document.getElementById('race-zone').getBoundingClientRect(),s=shell.getBoundingClientRect();return {bar:{x:Math.round(a.x),y:Math.round(a.y),w:Math.round(a.width),h:Math.round(a.height)},race:{y:Math.round(r.y),h:Math.round(r.height)},shell:{w:Math.round(s.width),h:Math.round(s.height),scrollW:shell.scrollWidth,clientW:shell.clientWidth}};}
   };
   buildGiftBar();buildTeams();setupMedia();connectBridge();requestAnimationFrame(frame);

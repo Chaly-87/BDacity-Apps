@@ -730,7 +730,8 @@ client.on(EventType.follow, (data) => {
   broadcast({
     id: nextId("follow"),
     type: "follow",
-    username: usernameFrom(data)
+    username: usernameFrom(data),
+    userId: data?.user?.id != null ? String(data.user.id) : null
   });
 });
 
@@ -738,7 +739,8 @@ client.on(EventType.share, (data) => {
   broadcast({
     id: nextId("share"),
     type: "share",
-    username: usernameFrom(data)
+    username: usernameFrom(data),
+    userId: data?.user?.id != null ? String(data.user.id) : null
   });
 });
 
