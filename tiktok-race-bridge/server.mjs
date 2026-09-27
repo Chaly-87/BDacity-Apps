@@ -713,6 +713,19 @@ client.on(EventType.like, (data) => {
   });
 });
 
+// LIVE DATA ONLY: retransmitir APENAS a contagem real de viewers do TikTok.
+// Sem valor real disponível, nada é enviado (o jogo mantém o contador oculto).
+client.on(EventType.roomUserSeq, (data) => {
+  const viewers = Number(data?.viewerCount ?? data?.userCount ?? data?.total ?? 0);
+  if (Number.isFinite(viewers) && viewers > 0) {
+    broadcast({
+      id: nextId("viewers"),
+      type: "viewers",
+      count: viewers
+    });
+  }
+});
+
 client.on(EventType.follow, (data) => {
   broadcast({
     id: nextId("follow"),

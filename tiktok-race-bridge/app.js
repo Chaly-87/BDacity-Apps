@@ -20,6 +20,9 @@
   const MUSIC_LEVELS={waiting:.6,race:.85,results:.3};
   const KART_SCALE=.8;
   const MUSIC_SRC='/assets/official-track.mp3';
+  // LIVE DATA ONLY: sem viewers fake. O contador só aparece com número real
+  // enviado pela ponte (evento roomUser/stats). Sem dados → oculto.
+  function setViewerCount(n){const v=el('viewers');if(!v)return;const num=Math.max(0,Math.floor(Number(n)));if(Number.isFinite(num)&&num>0){v.hidden=false;v.textContent='◉ '+num.toLocaleString('pt-PT');}else{v.hidden=true;}}
   const canvas=document.getElementById('race-canvas'),ctx=canvas.getContext('2d',{alpha:true});
   const shell=document.getElementById('shell'),music=document.getElementById('music'),hostVideo=document.getElementById('host-video');
   const goSound=(()=>{const a=new Audio('/assets/countdown-go.mp3');a.preload='auto';a.volume=.9;return a;})();
@@ -151,16 +154,20 @@
     }
     ctx.restore();
   }
-  function drawTrackGeometry(){
+  function drawTrackGeometry(now){
     const mesh=TG.roadMesh(240),left=mesh.left,right=mesh.right,HW=TG.TRACK_PATH.roadHalfWidth;
     ctx.save();ctx.lineJoin='round';ctx.lineCap='round';
-    ctx.fillStyle='#070b16';ctx.fillRect(0,0,canvas.width,canvas.height);
+    // FUNDO: transparente → o cenário da cidade neon (neon-world.jpg) vê-se
+    // através do canvas. Asfalto só onde a estrada existe.
+    ctx.clearRect(0,0,canvas.width,canvas.height);
     ctx.beginPath();
     left.forEach((p,i)=>i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y));ctx.closePath();
     right.slice().reverse().forEach((p,i)=>i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y));ctx.closePath();
     const asphalt=ctx.createLinearGradient(0,0,0,canvas.height);
-    asphalt.addColorStop(0,'#2c3450');asphalt.addColorStop(1,'#232a44');
+    asphalt.addColorStop(0,'rgba(44,52,80,.96)');asphalt.addColorStop(1,'rgba(35,42,68,.96)');
+    ctx.shadowColor='rgba(10,20,60,.95)';ctx.shadowBlur=22;
     ctx.fillStyle=asphalt;ctx.fill('evenodd');
+    ctx.shadowBlur=0;
     drawKerbs(left);drawKerbs(right);
     drawBarrier(offsetOutward(left,mesh.center,7));
     drawBarrier(offsetOutward(right,mesh.center,7));
@@ -170,6 +177,19 @@
     const f=TG.pointAt(0,0);ctx.save();ctx.translate(f.x,f.y);ctx.rotate(f.angle);
     for(let x=-10;x<10;x+=5)for(let y=-HW;y<HW;y+=13){ctx.fillStyle=((x/5+y/13)&1)?'#fff':'#0b0e17';ctx.fillRect(x,y,5,13);}
     ctx.restore();
+    ctx.restore();
+  }
+  // Drones holográficos a orbitar o INFIELD (raio 118-152, bem dentro da
+  // curva interna ~190) — atmosfera viva sem tocar na pista.
+  function drawDrones(now){
+    const specs=[{r:120,sp:.00042,ph:0,c:'#40e8ff',s:2.6},{r:138,sp:-.00031,ph:2.1,c:'#ff5ec4',s:2.2},{r:152,sp:.00024,ph:4.2,c:'#ffd84d',s:2.0}];
+    ctx.save();
+    for(const d of specs){
+      const a=now*d.sp+d.ph,x=TG.TRACK_PATH.cx+Math.cos(a)*d.r,y=TG.TRACK_PATH.cy+Math.sin(a)*d.r*.86;
+      ctx.shadowColor=d.c;ctx.shadowBlur=12;
+      ctx.fillStyle=d.c;ctx.beginPath();ctx.arc(x,y,d.s,0,Math.PI*2);ctx.fill();
+      ctx.globalAlpha=.28;ctx.beginPath();ctx.arc(x,y,d.s+2.6,0,Math.PI*2);ctx.fill();ctx.globalAlpha=1;
+    }
     ctx.restore();
   }
   function drawGrid(){
@@ -237,7 +257,7 @@
     ctx.fillStyle='#fff';ctx.font='900 10px Arial';ctx.textAlign='center';ctx.fillText(String(rank),0,-20.5);
     ctx.restore();
   }
-  function draw(now){ctx.clearRect(0,0,canvas.width,canvas.height);drawTrackGeometry();drawGrid();const ranked=RL.rankRacers(state.racers);ranked.forEach((r,i)=>drawKart(r,i+1,now));}
+  function draw(now){ctx.clearRect(0,0,canvas.width,canvas.height);drawTrackGeometry(now);drawDrones(now);drawGrid();const ranked=RL.rankRacers(state.racers);ranked.forEach((r,i)=>drawKart(r,i+1,now));}
   function frame(now){const dt=Math.min(.05,(now-state.lastNow)/1000);state.lastNow=now;tickRace(dt,now);clearEvent(now);draw(now);state.frameCount+=1;if(now-state.lastFpsAt>=1000){state.fps=state.frameCount*1000/(now-state.lastFpsAt);state.fpsSamples.push(state.fps);if(state.fpsSamples.length>30)state.fpsSamples.shift();state.frameCount=0;state.lastFpsAt=now;renderHud();}requestAnimationFrame(frame);}
   function gift(id,user='@HUGO',source='demo',identity=null){
     const rule=RL.GIFT_RULES[id];if(!rule)return null;
@@ -273,7 +293,7 @@
   function maybeStartRealRace(){if(!DEMO_MODE&&state.phase==='waiting'&&state.racers.length>=2)beginRealRace();}
   function browserPtPtWelcome(name){return new Promise(resolve=>{const voices=window.speechSynthesis?.getVoices?.()||[],voice=voices.find(v=>String(v.lang).toLowerCase().startsWith('pt-pt'));if(!voice){resolve(false);return;}const utter=new SpeechSynthesisUtterance(`Bem-vindo, ${String(name).replace(/^@/,'')}.`);utter.lang='pt-PT';utter.voice=voice;utter.onend=()=>resolve(true);utter.onerror=()=>resolve(false);window.speechSynthesis.speak(utter);});}
   async function speakWelcome(name){if(!state.audio||state.ttsBusy)return;state.ttsBusy=true;let spoken=false;state.ttsLast={source:'silence',lang:null};setMusicLevel(.22);try{const res=await fetch(`/tts/welcome?name=${encodeURIComponent(String(name).replace(/^@/,''))}`);if(res.ok){const blob=await res.blob(),url=URL.createObjectURL(blob),audio=new Audio(url);await audio.play();await new Promise(resolve=>{audio.onended=resolve;audio.onerror=resolve;});URL.revokeObjectURL(url);spoken=true;state.ttsLast={source:'server',lang:res.headers.get('X-TTS-Language')||'pt-PT'};}if(!spoken){const ok=await browserPtPtWelcome(name);state.ttsLast=ok?{source:'browser',lang:'pt-PT'}:{source:'silence',lang:null};}}catch{const ok=await browserPtPtWelcome(name);state.ttsLast=ok?{source:'browser',lang:'pt-PT'}:{source:'silence',lang:null};}finally{setMusicLevel(phaseLevel());state.ttsBusy=false;}}
-  function onLiveEvent(ev){const type=String(ev?.type||'');const user=String(ev?.username||'@VIEWER').slice(0,24);if(type==='comment'){const map={1:0,red:0,2:1,blue:1,3:2,green:2,4:3,purple:3};const key=String(ev.comment||'').trim().toLowerCase();if(Object.hasOwn(map,key)){const outcome=RL.admitRacer({racers:state.racers,queue:state.queue,user:{userId:ev?.userId??null,uniqueId:ev?.uniqueId??null,username:user},team:map[key],maxRacers:MAX_RACERS,makeRacer});if(outcome.admitted){const joined=!outcome.queued;showEvent(user,'COMENTÁRIO',joined?'PILOTO INSCRITO':'PILOTO NA FILA','join',2600,`${user} COMENTOU ${String(ev.comment||'').toUpperCase()}`,joined?'NA CORRIDA':'NA FILA');maybeStartRealRace();}}}else if(type==='like')onLike({userId:ev?.userId??null,uniqueId:ev?.uniqueId??null,username:user},Number(ev.count)||1);else if(type==='gift'){const key=String(ev.giftName||'rose').toLowerCase();const id=Object.hasOwn(RL.GIFT_RULES,key)?key:RL.giftFor(Number(ev.totalDiamonds)||1).id;gift(id,user,'live',{userId:ev?.userId??null,uniqueId:ev?.uniqueId??null,username:user});}else if(type==='join'){showEvent(user,'ENTROU','BEM-VINDO','join',1600);void speakWelcome(user);}}
+  function onLiveEvent(ev){const type=String(ev?.type||'');const user=String(ev?.username||'@VIEWER').slice(0,24);if(type==='comment'){const map={1:0,red:0,2:1,blue:1,3:2,green:2,4:3,purple:3};const key=String(ev.comment||'').trim().toLowerCase();if(Object.hasOwn(map,key)){const outcome=RL.admitRacer({racers:state.racers,queue:state.queue,user:{userId:ev?.userId??null,uniqueId:ev?.uniqueId??null,username:user},team:map[key],maxRacers:MAX_RACERS,makeRacer});if(outcome.admitted){const joined=!outcome.queued;showEvent(user,'COMENTÁRIO',joined?'PILOTO INSCRITO':'PILOTO NA FILA','join',2600,`${user} COMENTOU ${String(ev.comment||'').toUpperCase()}`,joined?'NA CORRIDA':'NA FILA');maybeStartRealRace();}}}else if(type==='like')onLike({userId:ev?.userId??null,uniqueId:ev?.uniqueId??null,username:user},Number(ev.count)||1);else if(type==='gift'){const key=String(ev.giftName||'rose').toLowerCase();const id=Object.hasOwn(RL.GIFT_RULES,key)?key:RL.giftFor(Number(ev.totalDiamonds)||1).id;gift(id,user,'live',{userId:ev?.userId??null,uniqueId:ev?.uniqueId??null,username:user});}else if(type==='join'){showEvent(user,'ENTROU','BEM-VINDO','join',1600);void speakWelcome(user);}else if(type==='viewers'){setViewerCount(ev.count);}}
   function connectBridge(){if(location.protocol==='file:')return;const proto=location.protocol==='https:'?'wss':'ws';try{const ws=new WebSocket(`${proto}://${location.host}/ws`);state.ws=ws;ws.onopen=()=>{el('bridge-status').textContent='LIVE LIGADA';};ws.onmessage=e=>{try{onLiveEvent(JSON.parse(e.data));}catch{}};ws.onclose=()=>{el('bridge-status').textContent='MODO LOCAL';state.wsRetry=window.setTimeout(connectBridge,3500);};ws.onerror=()=>{};}catch{el('bridge-status').textContent='MODO LOCAL';}}
   function phaseLevel(){return state.phase==='race'?MUSIC_LEVELS.race:state.phase==='results'?MUSIC_LEVELS.results:MUSIC_LEVELS.waiting;}
   function setMusicLevel(v){music.volume=Math.max(0,Math.min(1,Number(v)||0));}

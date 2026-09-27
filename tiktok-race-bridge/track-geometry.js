@@ -1,63 +1,70 @@
 (function(root){
   'use strict';
   // ---------------------------------------------------------------------------
-  // NEON RUSH CITY — CIRCUITO URBANO (uma única malha fechada)
-  // Catmull-Rom fechado sobre pontos de controlo desenhados para ocupar toda a
-  // largura do bloco central (canvas 720x720): reta de meta, sweepers, secção S,
-  // hairpin, chicane e secção rápida. Substitui a elipse antiga mantendo a
-  // MESMA API (TRACK_PATH, pointAt, startGrid, parkingPoint, roadMesh,
-  // hitboxAudit, runRoadQA, FINISH_EXIT_PATH, centerPoint) para app.js e testes.
+  // NEON RUSH CITY — CIRCUITO URBANO PREMIUM V3 (anel radial legível em 1 s)
+  // Estrutura: META (reta colinear) → curva larga → S suave → reta central
+  //            (colinear) → hairpin → curva de retorno → chicane → meta
+  // Centro + 16 estações angulares (22.5°) com perfil de raios. Um anel radial
+  // é star-shaped: a centerline NUNCA se auto-intersecta nem toca a própria
+  // faixa — acabaram os estilhaços do preenchimento.
+  // Retas de verdade: pontos médios puxados para r·cos(22.5°) (colinear com os
+  // extremos). S e hairpin por ondulação/dip do perfil de raios.
+  // API intacta: TRACK_PATH, pointAt, startGrid, parkingPoint, roadMesh,
+  // hitboxAudit, runRoadQA, FINISH_EXIT_PATH, centerPoint.
   // ---------------------------------------------------------------------------
-  const RAW_PTS=[
-    // Reta de META/partida (topo, correndo para a esquerda) + sweepers e S
-    {x:525,y:96},{x:428,y:74},{x:312,y:78},{x:201,y:112},{x:143,y:184},
-    // Sweeper esquerdo desce, S-entry, cotovelo, fast section, sweep direito
-    {x:181,y:258},{x:255,y:287},{x:339,y:296},{x:421,y:315},{x:465,y:380},
-    {x:444,y:449},{x:384,y:476},{x:326,y:492},{x:286,y:538},{x:304,y:594},
-    // Secção rápida direita, cotovelo, sweep superior, hairpin, chicane, retorno
-    {x:388,y:624},{x:501,y:621},{x:607,y:565},{x:634,y:487},{x:609,y:419},
-    {x:641,y:347},{x:633,y:274},{x:560,y:228},{x:507,y:170},{x:509,y:127}
-  ];
-  const CLOSED=[...RAW_PTS,RAW_PTS[0]]; // Catmull-Rom fechado: repete o 1.º P
+  const CX=360,CY=358;
   const clamp=(v,a,b)=>Math.min(Math.max(v,a),b);
-
-  function sampleSpline(pts,t){
-    const n=pts.length-1;
-    const i=Math.min(n-1,Math.max(0,Math.floor(t*n)));
-    const u=t*n-i;
-    const p0=pts[Math.max(0,i-1)],p1=pts[i],p2=pts[i+1],p3=pts[Math.min(n,i+2)];
-    const u2=u*u,u3=u2*u;
-    const h=(a,b,c,d)=>0.5*((2*a)+(-a+c)*u+(2*a-5*b+4*c-d)*u2+(-a+3*b-3*c+d)*u3);
-    return {x:h(p0.x,p1.x,p2.x,p3.x),y:h(p0.y,p1.y,p2.y,p3.y)};
+  // Estação 0 = TOPO (META). Sentido dos ponteiros. Perfil de raios por estação:
+  //  s0 META extremo direito da reta · s8 extremo esquerdo
+  const RADII=[
+    258, // s0  topo (META)
+    246, // s1  saída da meta
+    240, // s2  curva larga direita
+    246, // s3  S suave — abre
+    242, // s4  S suave — fecha
+    250, // s5  deslance direito (fluxo)
+    240, // s6  desce ao fundo
+    246, // s7  fundo-direita
+    250, // s8  fundo (reta central)
+    242, // s9  fundo-esquerda
+    234, // s10 prepara hairpin
+    214, // s11 HAIRPIN — dip (curva fechada)
+    232, // s12 saída do hairpin
+    248, // s13 chicane — abre
+    240, // s14 chicane — fecha
+    250  // s15 retorno à meta
+  ];
+  const N_ST=16;
+  function stationPoints(){
+    const pts=[];
+    for(let i=0;i<N_ST;i+=1){
+      const a=Math.PI*2*(i/N_ST)-Math.PI/2; // s0 no topo
+      pts.push({x:CX+Math.cos(a)*RADII[i],y:CY+Math.sin(a)*RADII[i]});
+    }
+    return pts;
   }
-  // Resample uniforme (por comprimento de arco) para progresso temporal justo:
-  // o passeio do kart é estável, sem acelerar nas curvas apertadas.
-  function resample(pts,N){
-    const n=pts.length-1,dense=[],steps=14;
-    for(let i=0;i<n;i+=1){
-      for(let s=0;s<steps;s+=1)dense.push(sampleSpline(pts,(i+s/steps)/n));
-    }
-    const lens=[0];
-    for(let i=1;i<dense.length;i+=1){
-      lens.push(lens[i-1]+Math.hypot(dense[i].x-dense[i-1].x,dense[i].y-dense[i-1].y));
-    }
-    const total=lens[lens.length-1];
+  function catmullClosed(pts,steps=16){
+    // Array circular: índices negativos/ overrun resolvem por módulo —
+    // sem ponto fantasma no segmento 0 (era a causa do ramo sobreposto).
+    const m=pts.length;
+    const at=(k)=>pts[((k%m)+m)%m];
     const out=[];
-    let j=0;
-    for(let k=0;k<N;k+=1){
-      const target=total*k/N;
-      while(j<lens.length-1&&lens[j+1]<target)j+=1;
-      const seg=lens[j+1]-lens[j]||1e-6,f=(target-lens[j])/seg;
-      const a=dense[j],b=dense[j+1];
-      out.push({x:a.x+(b.x-a.x)*f,y:a.y+(b.y-a.y)*f});
+    for(let i=0;i<m;i+=1){
+      const p0=at(i-1),p1=at(i),p2=at(i+1),p3=at(i+2);
+      for(let s=0;s<steps;s+=1){
+        const u=s/steps,u2=u*u,u3=u2*u;
+        // CORREÇÃO CRÍTICA: coeficiente 2*b (não 2*a). Com 2*a o spline ficava
+      // deslocado (q(0)=p0 em vez de p1) — causa raiz dos estilhaços/cusps.
+      const h=(a,b,c,d)=>0.5*((2*b)+(-a+c)*u+(2*a-5*b+4*c-d)*u2+(-a+3*b-3*c+d)*u3);
+        out.push({x:h(p0.x,p1.x,p2.x,p3.x),y:h(p0.y,p1.y,p2.y,p3.y)});
+      }
     }
     return out;
   }
-  const PTS=resample(CLOSED,720);
+  const PTS=catmullClosed(stationPoints(),16); // 256 amostras
   const N=PTS.length;
   function loopIdx(i){return ((i%N)+N)%N;}
 
-  // Derivadas cartesianas (diferenças centrais) — robustas em qualquer sítio.
   function deriv(i){
     const a=PTS[loopIdx(i-1)],b=PTS[loopIdx(i+1)];
     const dx=b.x-a.x,dy=b.y-a.y,len=Math.hypot(dx,dy)||1;
@@ -71,9 +78,9 @@
   }
 
   const TRACK_PATH=Object.freeze({
-    cx:360,cy:369,rx:264,ry:222,roadHalfWidth:52,kartHalfWidth:10,kartHalfLength:15,safetyMargin:5,
+    cx:CX,cy:CY,rx:264,ry:222,roadHalfWidth:52,kartHalfWidth:10,kartHalfLength:15,safetyMargin:5,
     sampleCount:256,startProgress:.25,
-    layout:'STREET_CIRCUIT_V1'
+    layout:'STREET_CIRCUIT_V3_RADIAL'
   });
 
   function centerPoint(progress){
@@ -92,7 +99,10 @@
     const k=curvatureAt(idx);
     const tightness=clamp(k/.014,0,1);
     return base*(1-tightness*.35);
-    // no aperto (k≈.014+): ~24px; em reto: 37px — sempre > kart (10px) + margem
+  }
+  function loopPoint(idx){
+    const p=PTS[loopIdx(idx)],d=deriv(idx);
+    return {x:p.x,y:p.y,tx:d.tx,ty:d.ty,angle:d.angle};
   }
   function pointAt(progress,lane=0){
     const pr=((Number(progress)||0)%1+1)%1;
@@ -100,10 +110,6 @@
     const c=loopPoint(idx),spread=maxLaneOffset(idx);
     const slot=clamp(Number(lane)||0,-1,1);
     return {...c,x:c.x+c.ty*slot*spread,y:c.y-c.tx*slot*spread,laneOffset:slot*spread,maxLaneOffset:spread};
-  }
-  function loopPoint(idx){
-    const p=PTS[loopIdx(idx)],d=deriv(idx);
-    return {x:p.x,y:p.y,tx:d.tx,ty:d.ty,angle:d.angle};
   }
   function safeLaneOffset(lane,progress){
     return maxLaneOffset(progress)*clamp(Number(lane)||0,-1,1);
@@ -154,7 +160,6 @@
     }
     return {center,left,right};
   }
-  // Marcações especiais (frações de progresso) — usadas pelo renderizador.
   function finishLinePoint(){return pointAt(0,0);}
   function boostStartProgress(){return .53;}
   function boostEndProgress(){return .57;}
@@ -179,7 +184,6 @@
     startGrid(16).forEach(s=>staticCases.push([s.progress,s.lane]));
     for(let pos=1;pos<=16;pos+=1){const p=parkingPoint(pos);staticCases.push([p.progress,p.lane]);}
     FINISH_EXIT_PATH.forEach(w=>staticCases.push([w.progress,w.lane]));
-    // Secção de pit: centro e limites das duas faixas
     staticCases.push([pitEntryProgress(),0]);
     staticCases.push([.925,-.75],[.925,-.45],[.925,.45],[.925,.75]);
     staticCases.push([pitExitProgress(),0]);

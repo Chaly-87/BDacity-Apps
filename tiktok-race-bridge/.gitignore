@@ -23,9 +23,13 @@ tts/pkgconfig/
 
 # Local QA / preview artefacts (Windows Edge + puppeteer-core), not shipped.
 preview/
+qa-*.mjs
 browser-qa.mjs
 gift-qa.mjs
 preview-recorder.mjs
 tts-probe.mjs
+monitor-live.mjs
+live-monitor-*.json
+tts-fallback-body.json
 MATCH-MASTER-720x1280.png
 public/neon-kart.png
