@@ -11,6 +11,7 @@ work/
 # Tudo o resto é lixo de desenvolvimento local: binário Windows, DLLs,
 # voz pt-BR, modelos "cpu.opt" duplicados e amostras de teste.
 tts/*.exe
+tts/windows/
 tts/*.dll
 tts/*.wav
 tts/*.ok
@@ -24,6 +25,8 @@ tts/pkgconfig/
 # Local QA / preview artefacts (Windows Edge + puppeteer-core), not shipped.
 preview/
 qa-*.mjs
+!qa-v4.mjs
+!qa-v4-edgecases.mjs
 browser-qa.mjs
 gift-qa.mjs
 preview-recorder.mjs

@@ -73,15 +73,16 @@ test("Linux: argumentos sem --language e com --espeak_data", () => {
   assert.ok(espeak > 0, "falta --espeak_data");
   assert.equal(args[espeak + 1], path.join(LINUX, "espeak-ng-data"));
   // stof() do C++ espera ponto decimal sempre
-  assert.equal(args[args.indexOf("--length_scale") + 1], "1.1");
+  assert.equal(args[args.indexOf("--length_scale") + 1], "1.5");
   assert.equal(args[args.indexOf("--sentence_silence") + 1], "0.3");
 });
 
-test("Windows: linha que já funciona mantém --language pt", () => {
+test("Windows: Piper oficial usa a fonética eSpeak do modelo pt-PT", () => {
   const args = piperArgs("C:\\x\\pt_PT-tugao-medium.onnx", "win32");
   const lang = args.indexOf("--language");
-  assert.ok(lang > 0, "Windows perdeu --language");
-  assert.equal(args[lang + 1], "pt");
+  assert.equal(lang, -1, "Piper oficial não aceita --language");
+  assert.ok(args.includes("--espeak_data"));
+  assert.equal(args[args.indexOf("--length_scale")+1], "1.5");
   assert.ok(args.includes("--json-input"));
   assert.ok(args.includes("--output_file"));
 });

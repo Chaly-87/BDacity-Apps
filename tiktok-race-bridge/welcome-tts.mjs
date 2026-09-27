@@ -28,6 +28,7 @@
    ========================================================================== */
 import fs from "node:fs";
 import path from "node:path";
+import os from "node:os";
 import { spawn } from "node:child_process";
 import crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
@@ -47,12 +48,13 @@ const TTS_ENABLED = !["0", "false", "off", "no"].includes(
 const IS_WINDOWS = process.platform === "win32";
 const TTS_DIR = path.join(__dirname, "tts");
 const TTS_LINUX_DIR = path.join(TTS_DIR, "linux");
+const TTS_WINDOWS_DIR = path.join(TTS_DIR, "windows");
 const TTS_ESPEAK_DATA = path.join(TTS_LINUX_DIR, "espeak-ng-data");
 
 const TTS_BIN_CANDIDATES = [
   process.env.TTS_PIPER_BIN,
-  IS_WINDOWS ? path.join(TTS_DIR, "PiperPlus.Cli.exe") : path.join(TTS_LINUX_DIR, "piper"),
-  IS_WINDOWS ? path.join(process.cwd(), "tts", "PiperPlus.Cli.exe") : path.join(process.cwd(), "tts", "linux", "piper")
+  IS_WINDOWS ? path.join(TTS_WINDOWS_DIR, "piper.exe") : path.join(TTS_LINUX_DIR, "piper"),
+  IS_WINDOWS ? path.join(process.cwd(), "tts", "windows", "piper.exe") : path.join(process.cwd(), "tts", "linux", "piper")
 ].filter(Boolean);
 
 const TTS_MODEL_CANDIDATES = [
@@ -99,7 +101,7 @@ function ttsStatus() {
     model: model ? path.basename(model) : null,
     voice: model ? "pt_PT-tugão-medium" : null,
     language: model ? "pt-PT" : null,
-    engine: IS_WINDOWS ? "PiperPlus (Windows)" : "Piper rhasspy/piper (Linux x86_64)",
+    engine: IS_WINDOWS ? "Piper rhasspy/piper (Windows x86_64)" : "Piper rhasspy/piper (Linux x86_64)",
     espeakData: !!espeak,
     provider: model ? "Piper TTS (MIT) — sintese neural local" : null,
     cached: ttsCache.size,
@@ -191,6 +193,7 @@ let piperWorker = null;
 let piperBytes = Buffer.alloc(0);
 let piperPending = null;
 let piperError = "";
+const windowsWorkers = new Set();
 
 function stopPiperWorker(error) {
   const worker = piperWorker;
@@ -256,11 +259,12 @@ function cultureNumber(value) {
    -------------------------------------------------------------------------- */
 function piperArgs(model, platform = process.platform) {
   const windows = platform === "win32";
-  const scale = windows ? cultureNumber(1.1) : "1.1";
-  const silence = windows ? cultureNumber(0.3) : "0.3";
+  const scale = "1.5";
+  const silence = "0.3";
   const args = ["--model", model, "--output_file", "-", "--length_scale", scale, "--sentence_silence", silence, "--json-input"];
-  if (windows) args.push("--language", "pt");
-  else args.push("--espeak_data", TTS_ESPEAK_DATA);
+  // Both platforms now use the official eSpeak-based Piper runtime. The old
+  // C# phonemizer produced incompatible token IDs for this original Piper voice.
+  args.push("--espeak_data", windows ? path.join(TTS_WINDOWS_DIR,"espeak-ng-data") : TTS_ESPEAK_DATA);
   args.push("--quiet");
   return args;
 }
@@ -274,7 +278,7 @@ function piperEnv(platform = process.platform) {
 }
 
 function piperCwd(platform = process.platform) {
-  return platform === "win32" ? undefined : TTS_LINUX_DIR;
+  return platform === "win32" ? TTS_WINDOWS_DIR : TTS_LINUX_DIR;
 }
 
 function ensurePiperWorker() {
@@ -303,6 +307,7 @@ function ensurePiperWorker() {
 }
 
 function runPiper(text) {
+  if (IS_WINDOWS) return runWindowsPiper(text);
   return new Promise((resolve, reject) => {
     let worker;
     try { worker = ensurePiperWorker(); } catch (error) { reject(error); return; }
@@ -315,12 +320,37 @@ function runPiper(text) {
   });
 }
 
+async function runWindowsPiper(text) {
+  // The Windows C++ runtime uses a text-mode stdout: LF bytes inside PCM are
+  // expanded to CRLF. A WAV file is binary-safe; never frame that stdout as WAV.
+  const directory = await fs.promises.mkdtemp(path.join(os.tmpdir(), "neon-welcome-"));
+  const output = path.join(directory, "welcome.wav");
+  try {
+    const args = piperArgs(firstPtPtModel());
+    args[args.indexOf("--output_file") + 1] = output;
+    await new Promise((resolve, reject) => {
+      const worker = spawn(firstExisting(TTS_BIN_CANDIDATES), args, {windowsHide:true, cwd:TTS_WINDOWS_DIR, stdio:["pipe","ignore","pipe"]});
+      windowsWorkers.add(worker);let error="";
+      const timer=setTimeout(()=>{worker.kill();reject(new Error("TTS timeout"));},TTS_TIMEOUT_MS);
+      worker.stderr.on("data",chunk=>{error=(error+chunk).slice(-1000);});
+      worker.on("error",err=>{clearTimeout(timer);windowsWorkers.delete(worker);reject(err);});
+      worker.on("close",code=>{clearTimeout(timer);windowsWorkers.delete(worker);code===0?resolve():reject(new Error(`Piper Windows: ${code}: ${error}`));});
+      worker.stdin.on("error",reject);
+      worker.stdin.end(JSON.stringify({text})+"\n");
+    });
+    const wav=await fs.promises.readFile(output);
+    if(wav.length<44||wav.toString("ascii",0,4)!=="RIFF"||wav.readUInt32LE(4)+8!==wav.length)throw new Error("Invalid binary WAV from Piper");
+    return wav;
+  } finally { await fs.promises.rm(directory,{recursive:true,force:true}); }
+}
+
 function prewarmTts() {
   if (!TTS_ENABLED || !ttsStatus().ready) return;
   synthWelcome("Hugo").catch((error) => console.warn("[TTS] prewarm falhou:", error.message));
 }
 
 function closeTts() {
+  for (const worker of windowsWorkers) worker.kill();
   stopPiperWorker(new Error("Servidor a desligar"));
 }
 

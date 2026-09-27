@@ -78,7 +78,7 @@
   }
 
   const TRACK_PATH=Object.freeze({
-    cx:CX,cy:CY,rx:264,ry:222,roadHalfWidth:52,kartHalfWidth:10,kartHalfLength:15,safetyMargin:5,
+    cx:CX,cy:CY,rx:264,ry:222,roadHalfWidth:52,kartHalfWidth:14,kartHalfLength:21,safetyMargin:5,
     sampleCount:256,startProgress:.25,
     layout:'STREET_CIRCUIT_V3_RADIAL'
   });
@@ -135,8 +135,8 @@
     });
   }
   function parkingPoint(position){
-    const index=Math.max(0,(Number(position)||1)-1),row=Math.floor(index/4),col=index%4;
-    const progress=.02+row*.014,lane=-.78+col*.52;
+    const index=Math.max(0,(Number(position)||1)-1),row=Math.floor(index/2),col=index%2;
+    const progress=.03+row*.036,lane=col===0?-.48:.48;
     return {...pointAt(progress,lane),lane,progress:((progress%1)+1)%1,position:index+1};
   }
   function hitboxAudit(progress,lane){
@@ -149,6 +149,13 @@
       outward=Math.max(outward,-lateral);
     }
     return {finite,outward,inward,grassClearance:TRACK_PATH.roadHalfWidth-outward,infieldClearance:TRACK_PATH.roadHalfWidth-inward};
+  }
+  function finishRoutePoint(position,t){
+    const k=clamp(Number(t)||0,0,1),park=parkingPoint(position);
+    let progress,lane;
+    if(k<.55){const u=k/.55*(FINISH_EXIT_PATH.length-1),i=Math.floor(u),a=FINISH_EXIT_PATH[i],b=FINISH_EXIT_PATH[Math.min(i+1,FINISH_EXIT_PATH.length-1)],m=u-i;progress=a.progress+(b.progress-a.progress)*m;lane=a.lane+(b.lane-a.lane)*m;}
+    else{const a=FINISH_EXIT_PATH[FINISH_EXIT_PATH.length-1],m=(k-.55)/.45;progress=a.progress+(park.progress-a.progress)*m;lane=a.lane+(park.lane-a.lane)*m;}
+    return {...pointAt(progress,lane),progress,lane};
   }
   function roadMesh(samples=TRACK_PATH.sampleCount){
     const center=[],left=[],right=[];
@@ -184,6 +191,7 @@
     startGrid(16).forEach(s=>staticCases.push([s.progress,s.lane]));
     for(let pos=1;pos<=16;pos+=1){const p=parkingPoint(pos);staticCases.push([p.progress,p.lane]);}
     FINISH_EXIT_PATH.forEach(w=>staticCases.push([w.progress,w.lane]));
+    for(let pos=1;pos<=16;pos++)for(let step=0;step<=100;step++){const p=finishRoutePoint(pos,step/100);staticCases.push([p.progress,p.lane]);}
     staticCases.push([pitEntryProgress(),0]);
     staticCases.push([.925,-.75],[.925,-.45],[.925,.45],[.925,.75]);
     staticCases.push([pitExitProgress(),0]);
@@ -201,5 +209,5 @@
   const FINISH_EXIT_PATH=Object.freeze([
     Object.freeze({progress:.004,lane:0}),Object.freeze({progress:.013,lane:-.42}),Object.freeze({progress:.02,lane:-.78})
   ]);
-  root.TrackGeometry=Object.freeze({TRACK_PATH,FINISH_EXIT_PATH,centerPoint,maxLaneOffset,safeLaneOffset,pointAt,kartCorners,roadClearance,signedLateral,hitboxAudit,startGrid,parkingPoint,roadMesh,runRoadQA,finishLinePoint,boostStartProgress,boostEndProgress,pitEntryProgress,pitExitProgress});
+  root.TrackGeometry=Object.freeze({TRACK_PATH,FINISH_EXIT_PATH,centerPoint,maxLaneOffset,safeLaneOffset,pointAt,kartCorners,roadClearance,signedLateral,hitboxAudit,startGrid,parkingPoint,finishRoutePoint,roadMesh,runRoadQA,finishLinePoint,boostStartProgress,boostEndProgress,pitEntryProgress,pitExitProgress});
 })(typeof window!=='undefined'?window:globalThis);

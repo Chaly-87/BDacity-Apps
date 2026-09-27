@@ -8,7 +8,7 @@
   },
   "scripts": {
     "start": "node server.mjs",
-    "test": "node --test race-logic.test.mjs server.hardening.test.mjs track-geometry.test.mjs"
+    "test": "node --test race-logic.test.mjs race-lifecycle.test.mjs server.hardening.test.mjs track-geometry.test.mjs tts-runtime.test.mjs"
   },
   "dependencies": {
     "piratetok-live-js": "latest",

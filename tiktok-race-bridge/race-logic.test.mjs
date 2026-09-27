@@ -317,6 +317,15 @@ test('21. racerKey: userId > uniqueId > username fallback seguro', () => {
 // ---------------------------------------------------------------------------
 // NOVA REGRA: QUALQUER interação real = 1 racer (entrada imediata)
 // ---------------------------------------------------------------------------
+test('LIVE_INTERACTIVE applies gifts with the same cooldown guarantees',()=>{
+  const cooldownMap={};
+  for(const id of ['rose','bomb','emp','galaxy']){
+    const applied=R.applyGiftEffect({mode:R.MODES.LIVE_INTERACTIVE,gift:R.GIFT_RULES[id],source:'gift',target:'hugo',now:1000,cooldownMap});
+    assert.equal(applied.blocked,false);assert.equal(applied.effect,R.GIFT_RULES[id].effect);
+    const repeated=R.applyGiftEffect({mode:R.MODES.LIVE_INTERACTIVE,gift:R.GIFT_RULES[id],source:'gift',target:'hugo',now:1100,cooldownMap});
+    assert.equal(repeated.cooldown,true);
+  }
+});
 test('22. entrada: 1 like cria racer; likes/comment/gift extra = SEMPRE 1', () => {
   const state = freshState();
   const admit = (username, userId) => R.admitRacer({

@@ -31,5 +31,30 @@ button{font:inherit}#shell{position:relative;width:min(100vw,calc(100vh * .5625)
 .gift-card.active .gift-who{display:block;animation:giftWho .5s ease}
 .gift-card.active small{visibility:hidden}
 .gift-card.active{border-color:#fff;background:linear-gradient(145deg,color-mix(in srgb,var(--gift) 34%,rgba(17,9,43,.96)),rgba(3,9,25,.98));box-shadow:0 0 3.2cqw color-mix(in srgb,var(--gift),transparent 22%);animation:giftPulse .45s ease}
+/* V4 broadcast layer. Full circuit remains fixed in the frame. */
+[hidden]{display:none!important}
+.broadcast-label{position:absolute;z-index:5;top:1.6cqh;left:22cqw;right:22cqw;text-align:center;font:800 1.2cqw Arial;letter-spacing:.13em;color:#d9f9ff}.broadcast-label span{display:block;margin-top:.6cqh;color:#4ae9cb;font-size:1cqw}
+.world{transition:filter .8s;filter:saturate(.9) brightness(.57)}
+#shell[data-phase="waiting"] .world{animation:ambient-city 5s ease-in-out infinite}
+#shell[data-phase="grid"] .world,#shell[data-phase="countdown"] .world{filter:saturate(1.25) brightness(.82)}
+#shell[data-phase="race"] .world,#shell[data-phase="finishing"] .world{filter:saturate(1.3) brightness(.72)}
+#shell[data-phase="final_sprint"] .world{filter:saturate(1.55) brightness(.88)}
+#shell[data-camera] #race-zone:after{content:"";position:absolute;inset:0;z-index:4;pointer-events:none;box-shadow:inset 0 0 9cqw var(--event-color,#20e7ff);animation:broadcast-impulse .85s ease-out both}
+.countdown-overlay{display:none;position:absolute;z-index:9;inset:0;align-content:center;justify-items:center;background:radial-gradient(ellipse,rgba(1,8,20,.75),transparent 65%);pointer-events:none}
+#shell[data-phase="countdown"] .countdown-overlay{display:grid}
+.countdown-overlay small{font:900 2cqw Arial;letter-spacing:.3em;color:#fff}.countdown-overlay b{font:900 20cqw/1.1 Impact,Arial;color:#fff;text-shadow:0 0 5cqw #23e7ff}.countdown-overlay span{font:800 1.3cqw Arial;letter-spacing:.12em;color:#5deeff}
+.rush-hub{left:36.5cqw;top:21.5cqh;width:27cqw;min-height:17cqh;background:linear-gradient(145deg,rgba(8,21,41,.96),rgba(2,8,23,.93));border:.17cqw solid #335a73;box-shadow:0 1cqh 2cqw #010713,0 0 0 .6cqw #07122780}
+.rush-hub>strong{font-size:2cqw;letter-spacing:.2em;border-color:#23465d}.rush-hub li{font-size:1.3cqw;padding:.16cqh 0}.rush-hub>small{font-size:1.15cqw;line-height:1.35}.rush-hub>span{font-size:1.7cqw}.top3 li{font-size:1.4cqw}
+#shell[data-phase="waiting"] .rush-hub{min-height:8cqh;top:25cqh}
+.broadcast-label{top:5cqh;left:20cqw;right:auto;text-align:left;font-size:1cqw}.broadcast-label span{font-size:.85cqw;margin-top:.3cqh}
+.race-banner{left:21cqw;width:58cqw;bottom:1.4cqh;height:4.4cqh;border-color:#345974;box-shadow:0 .6cqh 2cqw #020713}.race-banner strong{font-size:2.15cqw}.race-banner small{font-size:1.1cqw;margin-top:.25cqh}
+.results{padding:5cqh 5cqw;background:radial-gradient(ellipse at 50% 30%,color-mix(in srgb,var(--winner) 22%,#07101f),#030817 80%)}
+.results:before{content:"";position:absolute;inset:0;pointer-events:none;background-image:radial-gradient(circle,var(--winner) 1px,transparent 2px);background-size:43px 51px;opacity:.25;animation:confetti-fall 3s linear infinite}
+.results-kicker{position:relative;display:block;font:800 1.3cqw Arial;letter-spacing:.2em;color:#c4d7e6}.results h2{position:relative;margin-top:1.5cqh;font-size:5.7cqw;letter-spacing:.025em;color:white;text-shadow:0 0 3cqw var(--winner)}
+.results .podium{margin-top:6cqh;gap:1.5cqw}.podium div{position:relative;min-width:0;height:14cqh;padding:2cqh .6cqw;border-width:.18cqw;background:linear-gradient(160deg,color-mix(in srgb,var(--team) 28%,#101628),#091123);box-shadow:0 1.3cqh 3cqw #0008}.podium div:first-child{height:17cqh;transform:translateY(0);border-color:#ffdd76}.podium b{display:block;font:900 5cqw Impact,Arial;color:var(--team)}.podium span{display:block;margin-top:1.4cqh;overflow:hidden;text-overflow:ellipsis;font:900 2cqw Arial}.podium small{display:block;margin-top:1.2cqh;font:700 1.25cqw Arial;color:#cdddeb}.winning-team{display:block;margin-top:3cqh;color:var(--winner);font:900 2.7cqw Arial;letter-spacing:.08em}.results p{margin:1.2cqh 0 2cqh;font:700 1.4cqw Arial;color:#bccbdc}.results em{display:block;font:900 1.6cqw Arial;font-style:normal;color:#fff}.results em span{display:inline-block;font-size:3cqw;color:#ffd84d;min-width:3cqw}
+#audio-toggle:focus-visible{outline:3px solid white;outline-offset:2px}
+@keyframes ambient-city{50%{filter:saturate(1.1) brightness(.7)}}
+@keyframes broadcast-impulse{0%{opacity:.8}100%{opacity:0}}
+@keyframes confetti-fall{to{background-position:22px 102px}}
 @keyframes giftWho{from{opacity:0;transform:translateY(.6cqh)}to{opacity:1;transform:translateY(0)}}
 @keyframes giftPulse{0%{transform:scale(.965)}55%{transform:scale(1.03)}100%{transform:scale(1)}}

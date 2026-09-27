@@ -28,6 +28,8 @@
       <img class="world" src="/assets/neon-world.jpg" alt="Cidade futurista em redor da pista">
       <canvas id="race-canvas" width="720" height="720" aria-label="Pista completa com os pilotos"></canvas>
       <div class="race-vignette"></div>
+      <div class="broadcast-label">DRONE 01 <span>● CIRCUITO COMPLETO</span></div>
+      <div class="countdown-overlay"><small>PREPARAR</small><b id="countdown-number">3</b><span>A TUA EQUIPA. A TUA CORRIDA.</span></div>
       <div class="race-hud lap-hud"><small>VOLTA</small><strong id="leader-lap">01/10</strong></div>
       <div class="race-hud time-hud"><small>TEMPO</small><strong id="race-time">06:00</strong></div>
       <ol id="top3" class="top3" aria-label="Top 3"></ol>
@@ -70,6 +72,8 @@
   <audio id="music" loop preload="auto"></audio>
   <script src="/race-logic.js"></script>
   <script src="/track-geometry.js"></script>
+  <script src="/race-lifecycle.js"></script>
+  <script src="/live-audio.js"></script>
   <script src="/app.js"></script>
 </body>
 </html>

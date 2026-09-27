@@ -334,6 +334,8 @@ const server = http.createServer((req, res) => {
     "/race-logic.js": ["race-logic.js", "text/javascript; charset=utf-8"],
     "/track-geometry.js": ["track-geometry.js", "text/javascript; charset=utf-8"],
     "/app.js": ["app.js", "text/javascript; charset=utf-8"],
+    "/race-lifecycle.js": ["race-lifecycle.js", "text/javascript; charset=utf-8"],
+    "/live-audio.js": ["live-audio.js", "text/javascript; charset=utf-8"],
     "/assets/neon-world.jpg": ["public/neon-world.jpg", "image/jpeg"],
     "/assets/neon-kart.png": ["public/neon-kart.png", "image/png"],
     "/assets/kart-team-0.png": ["public/kart-team-0.png", "image/png"],
@@ -976,6 +978,11 @@ async function shutdown(signal) {
 if (WS_TEST_HOOKS && typeof process.send === "function") {
   process.on("message", (msg) => {
     if (!msg || typeof msg !== "object") return;
+
+    if (msg.type === "live-event" && ["join","like","comment","gift","follow","share","leave","liveEnded"].includes(msg.event?.type)) {
+      broadcast({ ...msg.event, id: msg.event.id || nextId("qa") });
+      return;
+    }
 
     if (msg.type === "broadcast") {
       const count = Math.min(200, Math.max(1, Number(msg.count) || 1));

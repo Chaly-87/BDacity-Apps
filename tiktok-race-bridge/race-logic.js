@@ -7,6 +7,7 @@
   const FINISH_GRACE_MS = 45000;
   const MODES = Object.freeze({
     LIVE_COMPLIANT: 'LIVE_COMPLIANT',
+    LIVE_INTERACTIVE: 'LIVE_INTERACTIVE',
     FULL_INTERACTION_DEMO: 'FULL_INTERACTION_DEMO'
   });
 
@@ -234,7 +235,7 @@
   }
 
   function canGiftCompete(mode, source) {
-    if (mode !== MODES.FULL_INTERACTION_DEMO) return false;
+    if (![MODES.FULL_INTERACTION_DEMO, MODES.LIVE_INTERACTIVE].includes(mode)) return false;
     return source === 'gift' || source === 'demo' || source === 'sender';
   }
 
@@ -318,7 +319,7 @@
     const safeTarget = normalizeString(target || '');
     const safeSource = normalizeString(source || '');
 
-    if (mode !== MODES.FULL_INTERACTION_DEMO || !canGiftCompete(mode, 'gift')) {
+    if (!canGiftCompete(mode, 'gift')) {
       return { blocked: true, effect: 'neutral', impact: 0, target: safeTarget, source: safeSource };
     }
 
