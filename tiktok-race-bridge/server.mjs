@@ -340,6 +340,7 @@ const server = http.createServer((req, res) => {
     "/assets/kart-team-3.png": ["public/kart-team-3.png", "image/png"],
     "/assets/neon-funk.wav": ["public/neon-funk.wav", "audio/wav"],
     "/assets/live-track.mp3": ["public/live-track.mp3", "audio/mpeg"],
+    "/assets/countdown-go.mp3": ["public/countdown-go.mp3", "audio/mpeg"],
     "/assets/host-avatar.mp4": ["public/host-avatar.mp4", "video/mp4"],
     "/assets/host-poster.jpg": ["public/host-poster.jpg", "image/jpeg"],
     "/assets/psyfunk.mp3": ["public/psyfunk.mp3", "audio/mpeg"],
@@ -689,6 +690,7 @@ client.on(EventType.chat, (data) => {
     id: nextId("chat"),
     type: "comment",
     username: usernameFrom(data),
+    userId: data?.user?.id != null ? String(data.user.id) : null,
     comment: String(data?.content || "")
   });
 });
@@ -705,6 +707,7 @@ client.on(EventType.like, (data) => {
     id: nextId("like"),
     type: "like",
     username,
+    userId: data?.user?.id != null ? String(data.user.id) : null,
     count,
     totalLikeCount: Number(data?.totalLikeCount ?? data?.total ?? 0) || 0
   });
@@ -755,6 +758,7 @@ client.on(EventType.gift, (data) => {
       id: nextId("gift"),
       type: "gift",
       username,
+      userId: data?.user?.id != null ? String(data.user.id) : null,
       giftName: String(data?.gift?.name || "Gift"),
       giftId: data?.gift?.id ?? null,
       diamondCount,

@@ -179,3 +179,137 @@ test('17. finish parking slots', () => {
   assert.equal(p2[0] !== p3[0] || p2[1] !== p3[1], true);
   assert.equal(p1[0] >= 0 && p1[1] >= 0, true);
 });
+
+// ---------------------------------------------------------------------------
+// REGRA ABSOLUTA: 1 player = 1 racer
+// ---------------------------------------------------------------------------
+function simulateJoin(R, state, username, { userId = null, team = 1 } = {}) {
+  const user = { username, userId: userId || username.toLowerCase().replace(/^@/, '') };
+  const outcome = R.admitRacer({
+    racers: state.racers,
+    queue: state.queue,
+    user: { username: user.username, userId: user.userId },
+    team,
+    maxRacers: 16,
+    makeRacer: (index, name, teamId) => ({
+      userId: user.userId,
+      username: name,
+      teamId,
+      completedLaps: 0,
+      trackProgress: 0,
+      finished: false,
+      finishPosition: null
+    })
+  });
+  return outcome;
+}
+
+function freshState() {
+  return { racers: [], queue: new Map(), likesByUser: {} };
+}
+
+test('18. @HUGO: comentários x4 + 1000 likes + gift + reconnect = SEMPRE 1 racer', () => {
+  const state = freshState();
+
+  // 1.º comentário -> entra
+  const first = simulateJoin(R, state, '@HUGO');
+  assert.equal(first.admitted, true);
+  assert.equal(first.queued, false);
+  assert.equal(state.racers.length, 1);
+
+  // comentário repetido (mesmo userId, outro casing) NÃO cria outro carro
+  simulateJoin(R, state, '@HUGO');
+  simulateJoin(R, state, 'HUGO');
+  simulateJoin(R, state, '@hugo');
+  assert.equal(state.racers.length, 1, 'comentários repetidos não criam carros');
+
+  // 1000 likes NÃO criam outro carro (milestone sobre utilizador existente)
+  R.recordLike({ likesByUser: state.likesByUser, userId: R.racerKey({ userId: 'hugo' }), amount: 1000 });
+  const likesOutcome = R.admitRacer({
+    racers: state.racers,
+    queue: state.queue,
+    user: { username: '@HUGO', userId: 'hugo' },
+    team: 1,
+    makeRacer: () => ({})
+  });
+  assert.equal(likesOutcome.admitted, false, 'likes de quem já tem carro não admitem nada');
+  assert.equal(state.racers.length, 1);
+
+  // gift NÃO cria carro
+  const giftOutcome = R.admitRacer({
+    racers: state.racers,
+    queue: state.queue,
+    user: { username: '@HUGO', userId: 'hugo' },
+    makeRacer: () => ({})
+  });
+  assert.equal(giftOutcome.admitted, false);
+  assert.equal(state.racers.length, 1);
+
+  // reconnect (uniqueId em vez de userId) NÃO duplica — mesma chave
+  const reconnect = simulateJoin(R, state, 'HUGO', { userId: 'hugo' });
+  assert.equal(reconnect.admitted, false, 'reconnect não cria segundo carro');
+  assert.equal(state.racers.length, 1);
+
+  // fim de corrida: continua 1 racer associado, não pode reaparecer como 2.º
+  const racer = state.racers[0];
+  R.finishRacer(racer, 1, 95000);
+  const afterFinish = simulateJoin(R, state, '@HUGO');
+  assert.equal(afterFinish.admitted, false, 'terminado mantém-se ligado ao mesmo racer');
+  assert.equal(state.racers.length, 1);
+
+  assert.equal(R.countDuplicateRacers(state.racers), 0);
+});
+
+test('19. 16 utilizadores = 16 racers; 17.º vai para a fila; zero duplicados', () => {
+  const state = freshState();
+  for (let i = 1; i <= 16; i += 1) {
+    const outcome = simulateJoin(R, state, `@USER${i}`, { userId: `user-${i}` });
+    assert.equal(outcome.admitted, true);
+    assert.equal(outcome.queued, false);
+  }
+  assert.equal(state.racers.length, 16);
+  assert.equal(R.countDuplicateRacers(state.racers), 0, '16 users = 16 racers únicos');
+
+  // 17.º entra na fila
+  const seventeenth = simulateJoin(R, state, '@USER17', { userId: 'user-17' });
+  assert.equal(seventeenth.queued, true);
+  assert.equal(state.queue.size, 1);
+  assert.equal(state.racers.length, 16);
+
+  // tentativas repetidas de quem já cá está (16 keys) não mudam nada
+  for (let i = 1; i <= 16; i += 1) {
+    simulateJoin(R, state, `@USER${i}`, { userId: `user-${i}` });
+  }
+  assert.equal(state.racers.length, 16);
+  assert.equal(state.queue.size, 1);
+  assert.equal(R.countDuplicateRacers(state.racers), 0);
+});
+
+test('20. queue dedupe + transição queue->racer única', () => {
+  const state = freshState();
+  // encher a grelha
+  for (let i = 1; i <= 16; i += 1) simulateJoin(R, state, `@U${i}`, { userId: `u${i}` });
+
+  // queued: comentários/likes repetidos NÃO duplicam a queue
+  const firstQueued = simulateJoin(R, state, '@ESPERA', { userId: 'espera' });
+  assert.equal(firstQueued.queued, true);
+  simulateJoin(R, state, '@ESPERA');
+  simulateJoin(R, state, 'espera', { userId: 'espera' });
+  assert.equal(state.queue.size, 1, 'queue sem duplicados');
+  assert.equal(state.racers.length, 16);
+
+  // libertar um slot: o mesmo user não pode voltar a admitir-se a si próprio
+  state.racers = state.racers.filter((r) => r.userId !== 'u1');
+  const again = simulateJoin(R, state, '@ESPERA', { userId: 'espera' });
+  assert.equal(again.admitted, false, 'quem está em queue não admite direto (transição é do host/round)');
+  assert.equal(state.racers.length, 15);
+});
+
+test('21. racerKey: userId > uniqueId > username fallback seguro', () => {
+  assert.equal(R.racerKey({ userId: 'Hugo-PT', uniqueId: 'outro', username: '@x' }), 'hugo-pt');
+  assert.equal(R.racerKey({ uniqueId: 'Hugo_PT', username: '@y' }), 'hugo_pt');
+  assert.equal(R.racerKey({ username: '@Hugo' }), 'hugo');
+  assert.equal(R.racerKey('  @HUGO  '), 'hugo');
+  assert.equal(R.racerKey(null), '');
+  assert.equal(R.racerKey({ userId: '  ', username: '@Ana' }), 'ana');
+});

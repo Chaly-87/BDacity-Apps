@@ -366,6 +366,76 @@
     return !speaking && (lastAt == null || now - lastAt >= cooldown);
   }
 
+  // ---------------------------------------------------------------------------
+  // REGRA ABSOLUTA: 1 player = 1 racer.
+  // Chave única: userId (do server) → uniqueId → username, normalizada
+  // (trim, sem '@', minúsculas). O app.js usa SEMPRE estas funções para
+  // admits/lookup — nunca compara usernames diretamente.
+  // ---------------------------------------------------------------------------
+  function racerKey(value) {
+    // Resolução por prioridade: userId → uniqueId → username → playerId.
+    // Candidato vazio/só-espaços NÃO pára o fallback (ex.: userId:'  ' cai
+    // para username). Normalização: trim, sem '@', minúsculas.
+    const candidates = value && typeof value === 'object'
+      ? [value.userId, value.uniqueId, value.username, value.playerId]
+      : [value];
+    for (const candidate of candidates) {
+      const key = normalizeString(candidate, '').replace(/^@+/, '').toLowerCase();
+      if (key) return key;
+    }
+    return '';
+  }
+
+  function findRacerForUser(racers, user) {
+    const key = racerKey(user);
+    if (!key) return null;
+    const list = Array.isArray(racers) ? racers : [];
+    return list.find((racer) => racerKey({ userId: racer?.userId ?? racer?.username }) === key) || null;
+  }
+
+  function canJoinRace({ racers, queue, user } = {}) {
+    const key = racerKey(user ?? {});
+    if (!key) return false;
+    if (findRacerForUser(racers, key)) return false;   // já tem carro (ativo OU terminado)
+    // Map-like sem `instanceof` (falha cross-realm em harness vm): o que importa
+    // é o contrato .has() — a regra de fila mantém-se integralmente.
+    if (queue && typeof queue.has === 'function' && queue.has(key)) return false; // já está na fila
+    return true;
+  }
+
+  function admitRacer({ racers = [], queue = new Map(), user, team = 'neutral', maxRacers = 16, makeRacer } = {}) {
+    if (typeof makeRacer !== 'function') {
+      return { admitted: false, queued: false, racer: null, reason: 'no-factory' };
+    }
+    if (!canJoinRace({ racers, queue, user })) {
+      return { admitted: false, queued: false, racer: null, reason: 'duplicate' };
+    }
+    const key = racerKey(user ?? {});
+    const display = normalizeString(user?.username ?? user?.uniqueId ?? (typeof user === 'string' ? user : key), key);
+    if (racers.length < maxRacers) {
+      // 4.º argumento: identidade original — a fábrica deve guardar a CHAVE
+      // canónica no racer (nunca derivar userId do nome de exibição).
+      const racer = makeRacer(racers.length, display, team, user ?? key);
+      racers.push(racer);
+      return { admitted: true, queued: false, racer, reason: 'joined' };
+    }
+    queue.set(key, { username: display, teamId: typeof team === 'number' ? team : 1 });
+    return { admitted: true, queued: true, racer: null, reason: 'queued' };
+  }
+
+  function countDuplicateRacers(racers) {
+    const counts = new Map();
+    for (const racer of Array.isArray(racers) ? racers : []) {
+      const key = racerKey({ userId: racer?.userId ?? racer?.username });
+      counts.set(key, (counts.get(key) || 0) + 1);
+    }
+    let duplicates = 0;
+    for (const count of counts.values()) {
+      if (count > 1) duplicates += count - 1;
+    }
+    return duplicates;
+  }
+
   function recordLike({ likesByUser, userId, amount = 1 }) {
     const normalizedUserId = normalizeString(userId || 'unknown-user');
     likesByUser[normalizedUserId] = asNumber(likesByUser[normalizedUserId] ?? 0, 0) + asNumber(amount, 1);
@@ -394,6 +464,11 @@
     buildStartGrid,
     applyLikeMilestones,
     applyGiftEffect,
+    racerKey,
+    findRacerForUser,
+    canJoinRace,
+    admitRacer,
+    countDuplicateRacers,
     parkingSlot,
     avatarDisplay,
     canPlayFunny,
