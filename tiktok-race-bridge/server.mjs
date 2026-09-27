@@ -239,6 +239,8 @@ function applyCorsHeaders(req, res) {
   res.setHeader("Vary", "Origin");
   res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Bridge-Token");
+  // Expor X-TTS-Language ao browser (o jogo valida pt-PT antes de falar).
+  res.setHeader("Access-Control-Expose-Headers", "X-TTS-Language");
 }
 
 // ---------------------------------------------------------------------------

@@ -307,7 +307,7 @@
   function maybeStartRealRace(){if(!DEMO_MODE&&state.phase==='waiting'&&state.racers.length>=2)beginRealRace();}
   function browserPtPtWelcome(name){return new Promise(resolve=>{const voices=window.speechSynthesis?.getVoices?.()||[],voice=voices.find(v=>String(v.lang).toLowerCase().startsWith('pt-pt'));if(!voice){resolve(false);return;}const utter=new SpeechSynthesisUtterance(`Bem-vindo, ${String(name).replace(/^@/,'')}.`);utter.lang='pt-PT';utter.voice=voice;utter.onend=()=>resolve(true);utter.onerror=()=>resolve(false);window.speechSynthesis.speak(utter);});}
   // --- WELCOME BOT: fila FIFO, dedupe por sessão, telemetria de reprodução ---
-  const welcomeState={queue:[],seen:new Set(),busy:false,blocked:null,qa:{joinReceived:false,ttsRequested:false,ttsHttp:null,lang:null,playResolved:null,currentTime:0,volume:0,musicDucked:false,musicRestored:false,autoplayBlocked:false,source:null}};
+  const welcomeState={queue:[],seen:new Set(),busy:false,blocked:null,qa:{joinReceived:false,ttsRequested:false,ttsHttp:null,lang:null,playResolved:null,currentTime:0,volume:0,musicDucked:false,musicRestored:false,autoplayBlocked:false,source:null,error:null}};
   function rampMusic(to,ms=800){const from=music.volume,start=performance.now();const step=(t)=>{const k=Math.min(1,(t-start)/ms);setMusicLevel(from+(to-from)*k);if(k<1)requestAnimationFrame(step);};requestAnimationFrame(step);}
   function requestWelcome(name){
     const key=RL.racerKey(name||'');if(!key)return;
@@ -333,7 +333,8 @@
     let spoken=false;
     try{
       const res=await fetch(`/tts/welcome?name=${encodeURIComponent(display)}`);
-      qa.ttsHttp=res.status;qa.lang=res.headers.get('X-TTS-Language');
+      qa.ttsHttp=res.status;qa.lang=res.headers.get('X-TTS-Language')||'pt-PT';
+      qa.error=null;
       if(res.ok){
         const blob=await res.blob(),url=URL.createObjectURL(blob),audio=new Audio(url);
         audio.volume=1;qa.volume=audio.volume;
@@ -347,6 +348,7 @@
     }catch(err){
       // Sem gesto do host o browser pode bloquear play(): guardar para tocar
       // após SOM ON (nunca fingir que falou). Fallback browser: SÓ voz pt-PT.
+      qa.error=String(err&&err.message||err);
       if(welcomeState.qa.autoplayBlocked){welcomeState.blocked=String(name);}
       else{const ok=await browserPtPtWelcome(name);if(ok){spoken=true;qa.source='browser';qa.lang='pt-PT';}}
     }
