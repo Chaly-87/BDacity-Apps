@@ -5,6 +5,8 @@
   // V4 LIVE: relógio da corrida = MAX_RACE_DURATION (300s). A corrida termina
   // sempre: 10 voltas de alguém OU 5:00 no relógio — o que chegar primeiro.
   const TOTAL_LAPS=RL.TOTAL_LAPS,RACE_TIME=RL.MAX_RACE_DURATION,MAX_RACERS=16;
+  // V5 SHOW: boost a sério — 2.2× base durante ~3s (afeta física E visual).
+  const BOOST_MULT=2.2,BOOST_MS=3000;
   const TEAM_DEFS=[
     {id:0,key:'red',name:'EQUIPA RED',color:'#ff315f',rgb:[255,49,95]},
     {id:1,key:'blue',name:'EQUIPA BLUE',color:'#24a4ff',rgb:[36,164,255]},
@@ -30,11 +32,13 @@
   // barreiras, hazards, grid e karts deslocam-se juntos; a margem de folga do
   // hitbox audit (minRoadClearance 12.28) cobre o corte de ~5px nas bordas.
   const WORLD_ZOOM=1.1;
-  const MUSIC_SRC='/assets/official-track.mp3';
+  // V5 SHOW: música oficial = psyfunk.mp3 (ficheiro EXATO do utilizador,
+  // sem pitch/speed/remix). Para trocar no futuro: mudar SÓ esta constante.
+  const MUSIC_SRC='/assets/psyfunk.mp3';
   // LIVE DATA ONLY: sem viewers fake. O contador só aparece com número real
   // enviado pela ponte (evento roomUser/stats). Sem dados → oculto.
   function setViewerCount(n){const v=el('viewers');if(!v)return;const num=Math.max(0,Math.floor(Number(n)));if(Number.isFinite(num)&&num>0){v.hidden=false;v.textContent='◉ '+num.toLocaleString('pt-PT');}else{v.hidden=true;}}
-  const canvas=document.getElementById('race-canvas'),ctx=canvas.getContext('2d',{alpha:true});
+  const canvas=document.getElementById('race-canvas');let ctx=canvas.getContext('2d',{alpha:true});
   // V4 LIVE-SOURCE: backing store = tamanho CSS real do elemento (1 píxel de
   // raster por píxel de output). NÃO é zoom — é RESOLUÇÃO: no stream 1080×1920
   // o canvas rasteriza a 1080 (nítido) em vez de esticar os 720 originais;
@@ -72,7 +76,7 @@
     r.avatar=RL.avatarDisplay(r.avatar,name);
     // BASE SPEED: metade da velocidade da preview V4 — o ritmo rápido fica
     // reservado para TURBO/nitro/boost (mult 1.55). Lap base: ~60-77 s.
-    return Object.assign(r,{teamId,lane:((index%3)-1)*.78,baseSpeed:.013+(index%7)*.000625,boostUntil:0,shockUntil:0,displayProgress:0,finishRoute:0,gridIndex:index});
+    return Object.assign(r,{teamId,lane:((index%3)-1)*.78,baseSpeed:.013+(index%7)*.000625,boostUntil:0,shockUntil:0,visualBoostUntil:0,visualShockUntil:0,boostMult:BOOST_MULT,displayProgress:0,finishRoute:0,gridIndex:index});
   }
   function seed(count){state.racers=Array.from({length:Math.min(MAX_RACERS,count)},(_,i)=>makeRacer(i));state.finishCount=0;state.firstFinishAt=null;state.remaining=RACE_TIME;renderHud();}
   function prepareGrid(count=8){if(state.phase!=='waiting')return;seed(count);transition('lobby');}
@@ -91,6 +95,29 @@
   }
   const giftTimers=new Map();
   function playGiftSting(id,rule){audioMix.sting(id);}
+  // V5 SHOW — SISTEMA CENTRAL DE EFEITOS LIVE. Toda reação auditiva/visual de
+  // evento passa aqui: música (duck/restore), SFX, overlay e classes fx na
+  // shell (arena/cidade reagem). Um único caminho — sem lógica áudio espalhada.
+  const FX_KIND={turbo:'boost',boost:'boost',hazard:'explosion',slow:'explosion',shock:'shock',galaxy:'galaxy'};
+  function triggerLiveEffect(effect,{user='',giftId='',duration=2200}={}){
+    const kind=FX_KIND[effect]||'boost';
+    audioMix.effect(kind,duration);
+    shell.classList.remove('fx-boost','fx-explosion','fx-shock','fx-galaxy');
+    void shell.offsetWidth;
+    shell.classList.add(`fx-${kind}`);
+    clearTimeout(state.fxClassUntil);
+    state.fxClassUntil=setTimeout(()=>shell.classList.remove('fx-boost','fx-explosion','fx-shock','fx-galaxy'),Math.max(1200,Math.min(duration,3200)));
+    const overlayText={boost:`${user} — ${giftId==='rose'?'ROSA':'BOOST'} → TURBO`,explosion:`${user} — FOGUETE → EXPLOSÃO`,shock:`${user} — TROVÃO → SHOCK`,galaxy:`${user} — GALÁXIA → CAOS`}[kind];
+    if(overlayText)el('event-effect').textContent=overlayText;
+    refreshEntryPanel();
+  }
+  // Painel de entrada PERMANENTE — nunca desaparece nem é substituído por gifts.
+  function refreshEntryPanel(){
+    const panel=el('entry-panel');if(!panel)return;
+    panel.querySelectorAll('[data-entry-team]').forEach(el=>{el.classList.toggle('on',state.racers.some(r=>r.teamId===Number(el.dataset.entryTeam)));});
+    const count=state.racers.length;
+    const c=panel.querySelector('.entry-count');if(c)c.textContent=count?`${count} NA PISTA`:'À ESPERA DE PILOTOS';
+  }
   function highlightGift(id,user,consequence,duration=2600){
     const card=document.querySelector(`.gift-card[data-gift="${id}"]`);
     if(!card)return;
@@ -118,16 +145,17 @@
     el('leader-lap').textContent=String(Math.min(TOTAL_LAPS,(leader?.completedLaps||0)+1)).padStart(2,'0')+'/'+TOTAL_LAPS;
     const secs=Math.max(0,Math.ceil(state.remaining));el('race-time').textContent=String(Math.floor(secs/60)).padStart(2,'0')+':'+String(secs%60).padStart(2,'0');
     el('top3').innerHTML=ranked.slice(0,3).map((r,i)=>`<li style="--team:${TEAM_DEFS[r.teamId].color}">P${i+1} · ${safeText(r.username.slice(0,12))}</li>`).join('');
-    el('top10').innerHTML=ranked.slice(0,10).map((r,i)=>`<li style="--team:${TEAM_DEFS[r.teamId].color}"><i></i><span>${i+1}. ${safeText(r.username.slice(0,10))}</span><em>${r.finished?'FIN':`${Math.min(10,r.completedLaps+1)}/10`}</em></li>`).join('');
+      el('top10').innerHTML=ranked.slice(0,10).map((r,i)=>`<li style="--team:${TEAM_DEFS[r.teamId].color}"><i></i><span>${i+1}. ${safeText(r.username.slice(0,10))}</span><em>${r.finished?'FIN':`${Math.min(10,r.completedLaps+1)}/10`}</em></li>`).join('');
     TEAM_DEFS.forEach(t=>{const count=state.racers.filter(r=>r.teamId===t.id&&!r.finished).length;el(`team-count-${t.id}`).textContent=`${count} PILOTO${count===1?'':'S'}`;el(`team-energy-${t.id}`).style.setProperty('--energy',`${Math.min(100,12+count*14)}%`);});
+    refreshEntryPanel();
   }
-  function finishRacer(r,now){if(r.finished)return;state.finishCount+=1;RL.finishRacer(r,state.finishCount,now-state.raceStartedAt);r.finishRoute=0;if(state.firstFinishAt==null){state.firstFinishAt=now;transition('finishing');cameraPulse('finish');}showEvent(r.username,'META',`P${r.finishPosition}`,'finish',2200,`${r.username} CHEGOU À META`,`P${r.finishPosition} · META`);}
+  function finishRacer(r,now){if(r.finished)return;state.finishCount+=1;RL.finishRacer(r,state.finishCount,now-state.raceStartedAt);r.finishRoute=0;if(state.firstFinishAt==null){state.firstFinishAt=now;transition('finishing');cameraPulse('finish');}audioMix.effect('finish',600);showEvent(r.username,'META',`P${r.finishPosition}`,'finish',2200,`${r.username} CHEGOU À META`,`P${r.finishPosition} · META`);}
   function tickRace(dt,now){
     state.racers.filter(r=>r.finished&&r.finishRoute<1).forEach(r=>{r.finishRoute=Math.min(1,r.finishRoute+dt*.52);});
     if(!racing())return;
     const raceDt=dt*raceScale;state.remaining-=raceDt;
     const active=RL.rankRacers(state.racers.filter(r=>!r.finished));
-    active.forEach(r=>{const mult=now<r.boostUntil?1.55:now<r.shockUntil?.45:1;r.motionSpeed=(r.motionSpeed||0)+(r.baseSpeed*mult-(r.motionSpeed||0))*Math.min(1,dt*5);r.trackProgress+=r.motionSpeed*raceDt;
+    active.forEach(r=>{const mult=now<r.boostUntil?BOOST_MULT:now<r.shockUntil?.45:1;r.motionSpeed=(r.motionSpeed||0)+(r.baseSpeed*mult-(r.motionSpeed||0))*Math.min(1,dt*5);r.trackProgress+=r.motionSpeed*raceDt;
       while(r.trackProgress>=1&&!r.finished){r.trackProgress-=1;r.completedLaps++;r.currentLap=Math.min(TOTAL_LAPS,r.completedLaps+1);if(r.completedLaps>=TOTAL_LAPS)finishRacer(r,now);}
       r.totalProgress=r.completedLaps*RL.TRACK_LENGTH+r.trackProgress*RL.TRACK_LENGTH;r.displayProgress=r.trackProgress;
     });
@@ -299,10 +327,26 @@
     ctx.restore();
   }
   const trackMesh=TG.roadMesh(240);
+  // V5 PERF: pista/kerbs/barreiras/gantry são ESTÁTICOS por fase → desenhar
+  // 1× numa layer offscreen e blitar por frame. Só karts/drones/grid
+  // (dinâmicos) ficam no ciclo por frame. Mesmo output, menos trabalho.
+  // Requer `ctx` reatribuível (let) — as funções de desenho usam o closure.
+  const trackLayer=document.createElement('canvas');trackLayer.width=canvas.width;trackLayer.height=canvas.height;
+  const tctx=trackLayer.getContext('2d');
+  let trackLayerKey='';
+  function drawTrackLayer(now){
+    const key=`${state.phase}|${shell.classList.contains('galaxy')?'g':'n'}|${trackLayer.width}`;
+    if(key===trackLayerKey)return;
+    trackLayerKey=key;
+    tctx.setTransform(1,0,0,1,0,0);tctx.clearRect(0,0,trackLayer.width,trackLayer.height);
+    tctx.setTransform(ctx.getTransform());
+    const saved=ctx;ctx=tctx;drawTrackGeometry(now);ctx=saved;
+  }
   function draw(now){
-    // V4 ZOOM: frame() faz clearRect; por cá só rearma a transform de zoom.
     ctx.save();ctx.setTransform(1,0,0,1,0,0);ctx.clearRect(0,0,canvas.width,canvas.height);ctx.restore();
-    drawTrackGeometry(now);drawDrones(now);drawGrid();for(const hazard of state.obstacles||[]){if(now>hazard.until)continue;const p=TG.pointAt(hazard.progress,hazard.lane);ctx.save();ctx.translate(p.x,p.y);ctx.rotate(p.angle);ctx.fillStyle='#ff792c';ctx.shadowColor='#ff792c';ctx.shadowBlur=15;ctx.fillRect(-5,-17,10,34);ctx.shadowBlur=0;ctx.fillStyle='#101724';for(let j=-15;j<16;j+=9)ctx.fillRect(-5,j,10,4);ctx.restore();}const ranked=RL.rankRacers(state.racers);ranked.forEach((r,i)=>drawKart(r,i+1,now));
+    drawTrackLayer(now);
+    ctx.save();ctx.setTransform(1,0,0,1,0,0);ctx.drawImage(trackLayer,0,0);ctx.restore();
+    drawDrones(now);drawGrid();for(const hazard of state.obstacles||[]){if(now>hazard.until)continue;const p=TG.pointAt(hazard.progress,hazard.lane);ctx.save();ctx.translate(p.x,p.y);ctx.rotate(p.angle);ctx.fillStyle='#ff792c';ctx.shadowColor='#ff792c';ctx.shadowBlur=15;ctx.fillRect(-5,-17,10,34);ctx.shadowBlur=0;ctx.fillStyle='#101724';for(let j=-15;j<16;j+=9)ctx.fillRect(-5,j,10,4);ctx.restore();}const ranked=RL.rankRacers(state.racers);ranked.forEach((r,i)=>drawKart(r,i+1,now));
   }
   function frame(now){const dt=Math.min(.05,(now-state.lastNow)/1000);state.lastNow=now;tickLifecycle(now);tickRace(dt,now);clearEvent(now);if(now>state.cameraUntil)delete shell.dataset.camera;draw(now);state.frameCount+=1;if(now-state.lastFpsAt>=250){state.fps=state.frameCount*1000/(now-state.lastFpsAt);state.fpsSamples.push(state.fps);if(state.fpsSamples.length>120)state.fpsSamples.shift();state.frameCount=0;state.lastFpsAt=now;renderHud();}requestAnimationFrame(frame);}
   function gift(id,user='@HUGO',source='demo',identity=null){
@@ -326,14 +370,14 @@
     const giftTitle=BAR_ITEMS.find(x=>x.id===id)?.title||rule.name;
     showEvent(user,giftTitle,effectLabel,galaxyEvent?'galaxy':'gift',rule.duration,`${user} ENVIOU ${giftTitle}`,`${effectLabel} ${coolingDown?'EM ESPERA':'ATIVADO'}!`);
     highlightGift(id,`@${String(user).replace(/^@+/,'')}`,coolingDown?'EM ESPERA':effectLabel);
-    playGiftSting(id,rule);
+    triggerLiveEffect(rule.effect,{user,giftId:id,duration:rule.duration});
     if(!coolingDown){
-      if(sender&&['turbo','boost','galaxy'].includes(rule.effect))sender.visualBoostUntil=now+rule.duration;
-      if(['shock','hazard','slow','galaxy'].includes(rule.effect))ranked.filter(r=>r!==sender&&!r.finished).forEach(r=>r.visualShockUntil=now+rule.duration);
+      if(sender&&['turbo','boost','galaxy'].includes(rule.effect)){sender.boostUntil=now+BOOST_MS;sender.visualBoostUntil=sender.boostUntil;}
+      if(['shock','hazard','slow','galaxy'].includes(rule.effect))ranked.filter(r=>r!==sender&&!r.finished).forEach(r=>r.shockUntil=now+rule.duration);
       if(rule.effect==='hazard')state.obstacles=ranked.filter(r=>r!==sender&&!r.finished).slice(0,3).map(r=>({progress:(r.trackProgress+.035)%1,lane:r.lane,until:now+rule.duration}));
     }
     if(applied.blocked||!sender)return applied;
-    if(rule.effect==='turbo'||rule.effect==='boost'||rule.effect==='galaxy')sender.boostUntil=now+rule.duration;
+    if(rule.effect==='turbo'||rule.effect==='boost'||rule.effect==='galaxy')sender.boostUntil=now+BOOST_MS;
     if(rule.effect==='shock'||rule.effect==='hazard'||rule.effect==='slow'){ranked.filter(r=>r!==sender&&!r.finished).slice(0,5).forEach(r=>r.shockUntil=now+rule.duration);}
     if(rule.effect==='hazard'){state.obstacles=ranked.filter(r=>r!==sender&&!r.finished).slice(0,3).map(r=>({progress:(r.trackProgress+.035)%1,lane:r.lane,until:now+rule.duration}));}
     if(rule.effect==='galaxy')ranked.filter(r=>r!==sender&&!r.finished).forEach(r=>r.shockUntil=now+rule.duration);
@@ -345,7 +389,7 @@
     // 1000 likes = BÓNUS (boost) — nunca cria 2.º racer.
     if(!firstRacerViaLike&&milestones.length){const racer=RL.findRacerForUser(state.racers,user);if(racer){racer.boostUntil=performance.now()+1800;showEvent(display,`${total} LIKES`,'BÓNUS VELOCIDADE','likes');}}
     maybeStartRealRace();}
-  function showResults(){if(state.phase!=='finishing')return;transition('results');shell.classList.remove('sprint','galaxy');setMusicLevel(MUSIC_LEVELS.results);const ranked=RL.rankRacers(state.racers),winner=ranked.find(r=>r.finishPosition===1);shell.style.setProperty('--winner',winner?TEAM_DEFS[winner.teamId].color:'#20e7ff');const box=el('results');box.hidden=false;box.innerHTML=`<small class="results-kicker">NEON RUSH CITY • CORRIDA ${lifecycle.snapshot().round}</small><h2>${winner?'TEMOS VENCEDOR':'TEMPO ESGOTADO'}</h2><div class="podium">${ranked.slice(0,3).map((r,i)=>`<div style="--team:${TEAM_DEFS[r.teamId].color}"><b>${r.finished?'P'+r.finishPosition:'DNF'}</b><span>${safeText(r.username)}</span><small>${TEAM_DEFS[r.teamId].name}</small></div>`).join('')}</div><strong class="winning-team">${winner?TEAM_DEFS[winner.teamId].name+' VENCEU':'SEM VENCEDOR'}</strong><p>${state.finishCount}/${ranked.length} NA META · ${TOTAL_LAPS} VOLTAS</p><em>PRÓXIMA CORRIDA EM <span id="next-race-seconds">8</span>S</em>`;setRaceCopy('RESULTADOS FINAIS','A PRÓXIMA GRELHA ESTÁ A CHEGAR');state.lastRound=ranked.map(r=>({id:r.userId,position:r.finishPosition,laps:r.completedLaps,finished:r.finished}));}
+  function showResults(){if(state.phase!=='finishing')return;transition('results');shell.classList.remove('sprint','galaxy');setMusicLevel(MUSIC_LEVELS.results);audioMix.effect('results',1400);const ranked=RL.rankRacers(state.racers),winner=ranked.find(r=>r.finishPosition===1);shell.style.setProperty('--winner',winner?TEAM_DEFS[winner.teamId].color:'#20e7ff');const box=el('results');box.hidden=false;box.innerHTML=`<small class="results-kicker">NEON RUSH CITY • CORRIDA ${lifecycle.snapshot().round}</small><h2>${winner?'TEMOS VENCEDOR':'TEMPO ESGOTADO'}</h2><div class="podium">${ranked.slice(0,3).map((r,i)=>`<div style="--team:${TEAM_DEFS[r.teamId].color}"><b>${r.finished?'P'+r.finishPosition:'DNF'}</b><span>${safeText(r.username)}</span><small>${TEAM_DEFS[r.teamId].name}</small></div>`).join('')}</div><strong class="winning-team">${winner?TEAM_DEFS[winner.teamId].name+' VENCEU':'SEM VENCEDOR'}</strong><p>${state.finishCount}/${ranked.length} NA META · ${TOTAL_LAPS} VOLTAS</p><em>PRÓXIMA CORRIDA EM <span id="next-race-seconds">8</span>S</em>`;setRaceCopy('RESULTADOS FINAIS','A PRÓXIMA GRELHA ESTÁ A CHEGAR');state.lastRound=ranked.map(r=>({id:r.userId,position:r.finishPosition,laps:r.completedLaps,finished:r.finished}));}
   // V4 LIVE: cap absoluto de 5 minutos (MAX_RACE_DURATION). Congela o progresso
   // (racing() deixa de ser verdade), calcula o ranking final — terminados por
   // finishPosition, restantes por voltas+trackProgress —, atribui posições e
@@ -452,7 +496,19 @@
     if(type==='comment'&&Object.hasOwn(teams,comment)&&r&&['waiting','lobby','grid'].includes(state.phase)){r.teamId=teams[comment];r.team=TEAM_DEFS[r.teamId].key;eligible.get(identity.userId).teamId=r.teamId;}
     if(type==='gift'){
       const aliases={rosa:'rose',rose:'rose',rocket:'bomb',foguete:'bomb',thunder:'emp','trovão':'emp',trovao:'emp',galaxia:'galaxy','galáxia':'galaxy'};
-      const raw=String(ev.giftName||'').toLowerCase(),id=aliases[raw]||(Object.hasOwn(RL.GIFT_RULES,raw)?raw:RL.giftFor(Number(ev.totalDiamonds)||1).id);
+      const raw=String(ev.giftName||'').toLowerCase(),diamonds=Number(ev.totalDiamonds)||0;
+      // REGRA CRÍTICA: gift desconhecido NUNCA é ignorado — vira BOOST.
+      // Valor em diamantes escala a intensidade (1–9→1.8×, 10–49→2.0×, 50–99→2.2×, 100+→2.4×).
+      let id=aliases[raw]||raw;
+      if(!Object.hasOwn(RL.GIFT_RULES,id)){
+        const tierBoost=diamonds>=100?2.4:diamonds>=50?2.2:diamonds>=10?2.0:1.8;
+        showEvent(user,String(ev.giftName||'GIFT').toUpperCase(),'BOOST','gift',2200,`${user} ENVIOU ${String(ev.giftName||'GIFT').toUpperCase()}`,'BOOST ATIVADO!');
+        triggerLiveEffect('boost',{user,giftId:String(ev.giftName||'gift').toLowerCase(),duration:2200});
+        const gifter=RL.findRacerForUser(state.racers,identity);
+        if(gifter){gifter.boostUntil=performance.now()+BOOST_MS*(tierBoost/2.2);gifter.visualBoostUntil=gifter.boostUntil;gifter.boostMult=tierBoost;}
+        playGiftSting('rose',RL.GIFT_RULES.rose);
+        return;
+      }
       gift(id,user,'live',identity);
     }else if(type==='like'){
       const before=state.likesByUser[identity.userId]||0,count=Math.max(1,Number(ev.count)||1);
@@ -472,7 +528,7 @@
   }
   document.addEventListener('visibilitychange',()=>{if(!document.hidden&&state.audio)audioMix.resume().catch(()=>{});});
   document.addEventListener('pointerdown',()=>{if(state.audio)audioMix.resume().catch(()=>{});});
-  function setupMedia(){hostVideo.src='/assets/host-avatar.mp4';hostVideo.play().catch(()=>{});music.preload='auto';music.src=MUSIC_SRC;music.load();setMusicLevel(MUSIC_LEVELS.waiting);el('audio-toggle').addEventListener('click',toggleAudio);}
+  function setupMedia(){hostVideo.src='/assets/host-avatar.mp4';hostVideo.play().catch(()=>{});music.preload='auto';music.loop=true;music.src=MUSIC_SRC;music.load();setMusicLevel(MUSIC_LEVELS.waiting);el('audio-toggle').addEventListener('click',toggleAudio);}
   function qaAction(action){if(action!=='results'&&state.phase==='results'){el('results').hidden=true;}if(action==='grid')prepareGrid(16);else if(action==='race8')startRace(8);else if(action==='race16'){startRace(16);window.setTimeout(differentLaps,1100);}else if(action==='rose')gift('rose');else if(action==='premium')gift('emp');else if(action==='galaxy')gift('galaxy');else if(action==='likes')onLike('@NOVO_PILOTO',1000);else if(action==='finish')finishLeader();else if(action==='results')showResults();}
   document.querySelectorAll('[data-qa]').forEach(b=>b.addEventListener('click',()=>qaAction(b.dataset.qa)));
   if(new URLSearchParams(location.search).has('qa'))document.body.classList.add('qa');
