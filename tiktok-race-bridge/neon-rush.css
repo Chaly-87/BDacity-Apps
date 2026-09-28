@@ -6,9 +6,17 @@ button{font:inherit}#shell{position:relative;width:min(100vw,calc(100vh * .5625)
 #top-zone{top:0;height:20.3%;z-index:6;background:linear-gradient(180deg,rgba(4,12,42,.98),rgba(7,5,28,.97));border-bottom:.35cqw solid var(--cyan)}
 .top-head{height:8.1cqh;position:relative;background:linear-gradient(90deg,rgba(9,20,61,.9),rgba(37,5,62,.75))}.top-head h1{position:absolute;left:50%;top:.5cqh;transform:translateX(-50%);margin:0;font:italic 900 4.8cqw/1 Impact,'Arial Narrow',sans-serif;letter-spacing:.04em;white-space:nowrap;text-shadow:0 0 1.5cqw var(--cyan)}.top-head h1 span{color:#56efff}.top-head h1 b{display:block;color:#ff4cc2;font-size:4.2cqw;margin-left:6cqw;transform:skew(-9deg)}.top-head p{position:absolute;right:2cqw;top:1.2cqh;width:18cqw;margin:0;color:#39f1ff;text-align:right;font:900 1.85cqw/1.05 Arial;letter-spacing:.1em}
 .live-cluster{position:absolute;left:2cqw;top:1.3cqh;display:flex;gap:1cqw;z-index:2}.live-pill,.viewers{height:3.7cqh;padding:0 2cqw;display:flex;align-items:center;border-radius:1.2cqw;font-weight:900;font-size:2.3cqw}.live-pill{background:#f72a65;box-shadow:0 0 1.8cqw #f72a65}.live-pill i{width:1cqw;height:1cqw;border-radius:50%;margin-right:.8cqw;background:#fff;animation:pulse 1s infinite}.viewers{border:.25cqw solid #176cf5;background:#07122d}
-.gift-actions{position:absolute;left:1.6cqw;right:1.6cqw;top:8.3cqh;height:7.1cqh;display:grid;grid-template-columns:repeat(4,1fr);gap:.8cqw}.gift-card{position:relative;display:grid;grid-template-columns:4.6cqw 1fr;align-items:center;gap:.7cqw;padding:.5cqh .8cqw;border:.3cqw solid var(--gift);border-radius:1.5cqw;background:linear-gradient(145deg,rgba(17,9,43,.97),rgba(3,9,25,.97));box-shadow:0 0 1.6cqw color-mix(in srgb,var(--gift),transparent 40%)}.gift-icon{font-size:4cqw;filter:drop-shadow(0 0 .9cqw var(--gift))}.gift-card strong{display:block;color:var(--gift);font:900 2.1cqw/1 Impact,'Arial Narrow',sans-serif;letter-spacing:.03em}.gift-card b{display:block;margin-top:.4cqh;color:#fff;font:900 1.65cqw/1 Arial}.gift-card small{display:block;margin-top:.3cqh;color:#cfe7ff;font:700 1.02cqw/1 Arial;letter-spacing:.05em}
+.gift-actions{position:absolute;left:1.6cqw;right:1.6cqw;top:8.3cqh;height:7.1cqh;display:grid;grid-template-columns:repeat(4,1fr);gap:.8cqw}
+/* V4-LEGIBILITY: ICON + NOME + EFEITO em grande — legível a 720x1280 sem zoom. */
+.gift-card{position:relative;display:grid;grid-template-columns:5.4cqw 1fr;align-items:center;gap:.7cqw;padding:.5cqh .8cqw;border:.3cqw solid var(--gift);border-radius:1.5cqw;background:linear-gradient(145deg,rgba(17,9,43,.97),rgba(3,9,25,.97));box-shadow:0 0 1.6cqw color-mix(in srgb,var(--gift),transparent 40%)}.gift-icon{font-size:5.2cqw;filter:drop-shadow(0 0 .9cqw var(--gift))}.gift-card strong{display:block;color:var(--gift);font:900 2.5cqw/1 Impact,'Arial Narrow',sans-serif;letter-spacing:.03em}.gift-card b{display:block;margin-top:.5cqh;color:#fff;font:900 2.15cqw/1 Arial}.gift-card small{display:block;margin-top:.3cqh;color:#cfe7ff;font:700 1.02cqw/1 Arial;letter-spacing:.05em}
 .event-ticker{position:absolute;left:1.6cqw;right:1.6cqw;bottom:.8cqh;height:3.9cqh;display:grid;grid-template-columns:4.8cqw 1fr auto 1fr;align-items:center;gap:1cqw;padding:.45cqh 1.2cqw;border:.28cqw solid var(--pink);border-radius:1.5cqw;background:linear-gradient(90deg,#07112e,rgba(69,7,70,.93),#07112e);box-shadow:0 0 1.8cqw rgba(255,54,166,.55)}.event-avatar{width:3.2cqw;height:3.2cqw;border-radius:50%;display:grid;place-items:center;border:.3cqw solid var(--cyan);background:#172c4d;font-weight:900}.event-ticker strong{font:900 1.85cqw/1 Arial;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.event-arrow{font-size:2.4cqw;color:#ff70c6;letter-spacing:-.25cqw;text-shadow:0 0 1cqw rgba(255,112,198,.9)}.event-ticker b{font:italic 900 2cqw/1 Arial;color:#fff;text-align:center;border:.2cqw solid var(--pink);border-radius:.8cqw;padding:.45cqh .7cqw;box-shadow:inset 0 0 1cqw rgba(255,54,166,.35)}
 #race-zone{top:20.3%;height:56.25%;z-index:3;background:#07112d}.world{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:center 49%;filter:saturate(1.22) contrast(1.03) brightness(.78)}#race-canvas{position:absolute;inset:0;width:100%;height:100%;z-index:2}.race-vignette{position:absolute;inset:0;z-index:3;pointer-events:none;background:radial-gradient(ellipse at 50% 50%,transparent 48%,rgba(0,2,15,.46) 100%)}
+/* V4-LEGIBILITY: cidade ao fundo só atmosfera — pista + karts dominam.
+   Blur/escurecimento APENAS na imagem de fundo (.world): pista, karts, Gift Bar,
+   host, team dock e HUD ficam nítidos (desenhados em camadas acima).
+   Blur direto no <img> (barato) — NÃO usar backdrop-filter (pesado em raster
+   por software e seria substituído pelas animações de filter de fase). */
+.world{z-index:0}
 .race-hud{position:absolute;top:1.4cqh;z-index:5;width:14cqw;height:5.2cqh;padding:.6cqh 1cqw;border:.28cqw solid var(--cyan);border-radius:1.2cqw;background:rgba(2,10,27,.9);box-shadow:0 0 1.3cqw rgba(32,231,255,.45)}.lap-hud{left:1.7cqw}.time-hud{right:1.7cqw;border-color:var(--gold)}.race-hud small,.race-hud strong{display:block;text-align:center}.race-hud small{font:900 1.45cqw Arial;color:var(--cyan)}.time-hud small{color:var(--gold)}.race-hud strong{font:900 2.7cqw/1 Impact,Arial;margin-top:.25cqh}
 .top3{position:absolute;left:1.7cqw;top:8cqh;z-index:5;width:15cqw;margin:0;padding:0;list-style:none;display:grid;gap:.45cqh}.top3 li{height:2.25cqh;display:flex;align-items:center;padding:0 .8cqw;border:.18cqw solid var(--team);border-radius:.65cqw;background:rgba(3,9,25,.88);font:900 1.45cqw Arial;box-shadow:0 0 .8cqw color-mix(in srgb,var(--team),transparent 60%)}
 .rush-hub{position:absolute;z-index:5;left:38.5cqw;top:23.8cqh;width:23cqw;min-height:15.4cqh;padding:.9cqh 1cqw;border:.25cqw solid rgba(32,231,255,.9);border-radius:1.3cqw;background:rgba(3,10,30,.82);box-shadow:0 0 1.7cqw rgba(32,231,255,.34);text-align:center}.rush-hub>strong{display:block;color:var(--cyan);font:900 1.8cqw Impact,Arial;letter-spacing:.08em;border-bottom:.18cqw solid var(--cyan);padding-bottom:.5cqh}.rush-hub>span{display:block;font:900 1.6cqw Impact,Arial;margin:.65cqh 0 .2cqh}.rush-hub>small{display:block;color:var(--gold);font-size:1cqw}.rush-hub ol{list-style:none;margin:.55cqh 0 0;padding:0;display:grid;gap:.13cqh}.rush-hub li{display:grid;grid-template-columns:2cqw 1fr auto;gap:.4cqw;text-align:left;font:800 1.03cqw Arial}.rush-hub li i{width:.75cqw;height:.75cqw;border-radius:50%;background:var(--team);margin-top:.1cqh;box-shadow:0 0 .5cqw var(--team)}.rush-hub li em{font-style:normal;color:var(--team)}
@@ -20,25 +28,37 @@ button{font:inherit}#shell{position:relative;width:min(100vw,calc(100vh * .5625)
 .status-stack{position:absolute;right:1.6cqw;top:1.3cqh;width:25.7cqw;height:10.1cqh;display:grid;grid-template-rows:repeat(3,1fr);gap:.35cqh}.status-stack div{padding:.35cqh 1cqw;border:.2cqw solid var(--cyan);border-radius:.65cqw;background:#07102a}.status-stack b,.status-stack small{display:block}.status-stack b{font:900 1.25cqw Arial;color:var(--cyan)}.status-stack small{font:700 .88cqw Arial;color:#cfe3ff;margin-top:.15cqh}
 .team-dock{position:absolute;left:1.6cqw;right:1.6cqw;top:12.3cqh;height:8.2cqh;display:grid;grid-template-columns:repeat(4,1fr);gap:.8cqw}.team-card{position:relative;border:.3cqw solid var(--team);border-radius:1.1cqw;background:#071329;padding:.7cqh .8cqw .5cqh 1cqw;box-shadow:0 0 1.2cqw color-mix(in srgb,var(--team),transparent 50%);overflow:hidden}.team-flame{position:absolute;right:.5cqw;bottom:.5cqh;font-size:1.9cqw;filter:drop-shadow(0 0 .6cqw #ff7a1a);pointer-events:none;z-index:2}.team-kart{position:absolute;right:.3cqw;top:.2cqh;width:9.6cqw;height:7.4cqh;object-fit:contain;object-position:right center;opacity:.95;pointer-events:none;filter:drop-shadow(0 0 .8cqw color-mix(in srgb,var(--team),transparent 35%))}.team-card strong,.team-card small{display:block;position:relative;z-index:1;max-width:11cqw}.team-card strong{color:var(--team);font:900 1.35cqw Arial;text-shadow:0 0 .6cqw #000}.team-card small{margin-top:.35cqh;font:800 1.05cqw Arial;text-shadow:0 0 .6cqw #000}.energy{position:absolute;left:1cqw;right:1cqw;bottom:.65cqh;height:.9cqh;border:.18cqw solid var(--team);border-radius:.6cqw;overflow:hidden;background:rgba(0,0,0,.45);z-index:2}.energy i{display:block;height:100%;width:var(--energy);background:var(--team);box-shadow:0 0 .8cqw var(--team)}.join-hint{position:absolute;left:0;right:0;bottom:.25cqh;margin:0;text-align:center;color:#cfe6ff;font:700 .95cqw Arial;letter-spacing:.04em}.join-hint b{color:var(--cyan)}
 #qa-controls{position:absolute;z-index:80;left:.8cqw;right:.8cqw;bottom:.5cqh;display:none;grid-template-columns:repeat(9,1fr);gap:.25cqw;pointer-events:auto}body.qa #qa-controls{display:grid}#qa-controls button{height:2.5cqh;padding:0;border:.12cqw solid var(--cyan);border-radius:.35cqw;background:#06142f;color:#fff;font:800 .76cqw Arial;cursor:pointer}
-.galaxy #race-zone{filter:hue-rotate(25deg) saturate(1.45)}.sprint .race-banner{border-color:var(--gold);box-shadow:0 0 3cqw var(--gold)}
+/* V4-LEGIBILITY: .galaxy coloriza SÓ o fundo (antes tingia também pista+karts). */
+.galaxy .world{filter:blur(2px) hue-rotate(25deg) saturate(1.3) brightness(.62)!important}.sprint .race-banner{border-color:var(--gold);box-shadow:0 0 3cqw var(--gold)}
 @keyframes pulse{50%{opacity:.35}}@keyframes eventPulse{to{transform:scale(1.018);box-shadow:0 0 4cqw var(--pink)}}
 @media(prefers-reduced-motion:reduce){*,*:before,*:after{animation:none!important;transition:none!important}}
 @media(max-aspect-ratio:9/16){#shell{width:100vw;height:177.778vw}}@media(min-aspect-ratio:9/16){#shell{width:56.25vh;height:100vh}}
 
 /* Gift Action Bar: labels fixos + destaque temporário */
 .gift-actions .gift-body{position:relative;min-width:0}
-.gift-card .gift-who{display:none;position:absolute;left:0;right:0;bottom:-.1cqh;padding:.32cqh .3cqw;border-radius:.6cqw;background:var(--gift);color:#06111f;font:900 1.05cqw/1 Arial;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.gift-card .gift-who{display:none;position:absolute;left:0;right:0;bottom:-.1cqh;padding:.32cqh .3cqw;border-radius:.6cqw;background:var(--gift);color:#06111f;font:900 1.3cqw/1 Arial;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .gift-card.active .gift-who{display:block;animation:giftWho .5s ease}
 .gift-card.active small{visibility:hidden}
 .gift-card.active{border-color:#fff;background:linear-gradient(145deg,color-mix(in srgb,var(--gift) 34%,rgba(17,9,43,.96)),rgba(3,9,25,.98));box-shadow:0 0 3.2cqw color-mix(in srgb,var(--gift),transparent 22%);animation:giftPulse .45s ease}
-/* V4 broadcast layer. Full circuit remains fixed in the frame. */
-[hidden]{display:none!important}
-.broadcast-label{position:absolute;z-index:5;top:1.6cqh;left:22cqw;right:22cqw;text-align:center;font:800 1.2cqw Arial;letter-spacing:.13em;color:#d9f9ff}.broadcast-label span{display:block;margin-top:.6cqh;color:#4ae9cb;font-size:1cqw}
+/* V4-LEGIBILITY: HUD legível a 720x1280 sem zoom — rótulos 2.2cqw, valores 3.6cqw,
+   caixas maiores e pill TOP3 com número destacado. Sem texto decorativo minúsculo. */
+.race-hud{width:15.5cqw;height:6.4cqh;padding:.75cqh 1cqw}
+.race-hud small{font-size:2.2cqw}
+.race-hud strong{font-size:3.6cqw}
+.top3{top:8.7cqh;width:16.5cqw;gap:.55cqh}
+.top3 li{height:2.9cqh;font-size:2.05cqw;border-width:.24cqw;gap:.55cqw}
+.top3 li b{font-size:2.15cqw}
+.broadcast-label{font-size:1.55cqw}.broadcast-label span{font-size:1.25cqw}
+.rush-hub>small{font-size:1.3cqw}
+
 .world{transition:filter .8s;filter:saturate(.9) brightness(.57)}
-#shell[data-phase="waiting"] .world{animation:ambient-city 5s ease-in-out infinite}
-#shell[data-phase="grid"] .world,#shell[data-phase="countdown"] .world{filter:saturate(1.25) brightness(.82)}
-#shell[data-phase="race"] .world,#shell[data-phase="finishing"] .world{filter:saturate(1.3) brightness(.72)}
-#shell[data-phase="final_sprint"] .world{filter:saturate(1.55) brightness(.88)}
+/* V4-LEGIBILITY: filtros de fase incluem sempre o blur de fundo (a animação de
+   filter substituiria o blur base — por isso cada estado redefine a cadeia).
+   :not(.galaxy) evita que ambient-city apague a tintura da galáxia. */
+#shell[data-phase="waiting"]:not(.galaxy) .world{animation:ambient-city 5s ease-in-out infinite}
+#shell[data-phase="grid"] .world,#shell[data-phase="countdown"] .world{filter:blur(2px) saturate(1.02) brightness(.66)}
+#shell[data-phase="race"] .world,#shell[data-phase="finishing"] .world{filter:blur(2px) saturate(1.02) brightness(.6)}
+#shell[data-phase="final_sprint"] .world{filter:blur(2px) saturate(1.1) brightness(.68)}
 #shell[data-camera] #race-zone:after{content:"";position:absolute;inset:0;z-index:4;pointer-events:none;box-shadow:inset 0 0 9cqw var(--event-color,#20e7ff);animation:broadcast-impulse .85s ease-out both}
 .countdown-overlay{display:none;position:absolute;z-index:9;inset:0;align-content:center;justify-items:center;background:radial-gradient(ellipse,rgba(1,8,20,.75),transparent 65%);pointer-events:none}
 #shell[data-phase="countdown"] .countdown-overlay{display:grid}
@@ -46,14 +66,14 @@ button{font:inherit}#shell{position:relative;width:min(100vw,calc(100vh * .5625)
 .rush-hub{left:36.5cqw;top:21.5cqh;width:27cqw;min-height:17cqh;background:linear-gradient(145deg,rgba(8,21,41,.96),rgba(2,8,23,.93));border:.17cqw solid #335a73;box-shadow:0 1cqh 2cqw #010713,0 0 0 .6cqw #07122780}
 .rush-hub>strong{font-size:2cqw;letter-spacing:.2em;border-color:#23465d}.rush-hub li{font-size:1.3cqw;padding:.16cqh 0}.rush-hub>small{font-size:1.15cqw;line-height:1.35}.rush-hub>span{font-size:1.7cqw}.top3 li{font-size:1.4cqw}
 #shell[data-phase="waiting"] .rush-hub{min-height:8cqh;top:25cqh}
-.broadcast-label{top:5cqh;left:20cqw;right:auto;text-align:left;font-size:1cqw}.broadcast-label span{font-size:.85cqw;margin-top:.3cqh}
+.broadcast-label{top:5cqh;left:20cqw;right:auto;text-align:left;font-size:1.35cqw}.broadcast-label span{font-size:1.1cqw;margin-top:.3cqh}
 .race-banner{left:21cqw;width:58cqw;bottom:1.4cqh;height:4.4cqh;border-color:#345974;box-shadow:0 .6cqh 2cqw #020713}.race-banner strong{font-size:2.15cqw}.race-banner small{font-size:1.1cqw;margin-top:.25cqh}
 .results{padding:5cqh 5cqw;background:radial-gradient(ellipse at 50% 30%,color-mix(in srgb,var(--winner) 22%,#07101f),#030817 80%)}
 .results:before{content:"";position:absolute;inset:0;pointer-events:none;background-image:radial-gradient(circle,var(--winner) 1px,transparent 2px);background-size:43px 51px;opacity:.25;animation:confetti-fall 3s linear infinite}
 .results-kicker{position:relative;display:block;font:800 1.3cqw Arial;letter-spacing:.2em;color:#c4d7e6}.results h2{position:relative;margin-top:1.5cqh;font-size:5.7cqw;letter-spacing:.025em;color:white;text-shadow:0 0 3cqw var(--winner)}
 .results .podium{margin-top:6cqh;gap:1.5cqw}.podium div{position:relative;min-width:0;height:14cqh;padding:2cqh .6cqw;border-width:.18cqw;background:linear-gradient(160deg,color-mix(in srgb,var(--team) 28%,#101628),#091123);box-shadow:0 1.3cqh 3cqw #0008}.podium div:first-child{height:17cqh;transform:translateY(0);border-color:#ffdd76}.podium b{display:block;font:900 5cqw Impact,Arial;color:var(--team)}.podium span{display:block;margin-top:1.4cqh;overflow:hidden;text-overflow:ellipsis;font:900 2cqw Arial}.podium small{display:block;margin-top:1.2cqh;font:700 1.25cqw Arial;color:#cdddeb}.winning-team{display:block;margin-top:3cqh;color:var(--winner);font:900 2.7cqw Arial;letter-spacing:.08em}.results p{margin:1.2cqh 0 2cqh;font:700 1.4cqw Arial;color:#bccbdc}.results em{display:block;font:900 1.6cqw Arial;font-style:normal;color:#fff}.results em span{display:inline-block;font-size:3cqw;color:#ffd84d;min-width:3cqw}
 #audio-toggle:focus-visible{outline:3px solid white;outline-offset:2px}
-@keyframes ambient-city{50%{filter:saturate(1.1) brightness(.7)}}
+@keyframes ambient-city{50%{filter:blur(2px) saturate(.96) brightness(.62)}}
 @keyframes broadcast-impulse{0%{opacity:.8}100%{opacity:0}}
 @keyframes confetti-fall{to{background-position:22px 102px}}
 @keyframes giftWho{from{opacity:0;transform:translateY(.6cqh)}to{opacity:1;transform:translateY(0)}}

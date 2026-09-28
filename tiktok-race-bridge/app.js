@@ -18,12 +18,23 @@
     {id:'galaxy',icon:'🌌',title:'GALÁXIA',tagline:'EFEITO ALEATÓRIO',color:'#bd5cff'}
   ];
   const MUSIC_LEVELS={waiting:.6,race:.85,results:.3};
-  const KART_SCALE=1.02;
+  // V4-LEGIBILITY: karts ~17.6% maiores no ecrã. APENAS visual (scale de draw):
+  // TRACK_PATH.kartHalfWidth/kartHalfLength (física/QA) ficam intactos.
+  const KART_SCALE=1.2;
+  // V4 ZOOM: câmara do MUNDO (+10%) aplicada só no desenho do canvas da pista —
+  // HUD/top/bottom intocados. Zoom em coordenadas de MUNDO (antes do reset do
+  // contexto): os vectores voltam a rasterizar nítidos — resolve o "desfocado"
+  // sem blur. trackMesh é construída no mesmo espaço, pelo que pista, kerbs,
+  // barreiras, hazards, grid e karts deslocam-se juntos; a margem de folga do
+  // hitbox audit (minRoadClearance 12.28) cobre o corte de ~5px nas bordas.
+  const WORLD_ZOOM=1.1;
   const MUSIC_SRC='/assets/official-track.mp3';
   // LIVE DATA ONLY: sem viewers fake. O contador só aparece com número real
   // enviado pela ponte (evento roomUser/stats). Sem dados → oculto.
   function setViewerCount(n){const v=el('viewers');if(!v)return;const num=Math.max(0,Math.floor(Number(n)));if(Number.isFinite(num)&&num>0){v.hidden=false;v.textContent='◉ '+num.toLocaleString('pt-PT');}else{v.hidden=true;}}
   const canvas=document.getElementById('race-canvas'),ctx=canvas.getContext('2d',{alpha:true});
+  // (a transformação de zoom é aplicada aqui — ctx já existe)
+  ctx.translate(canvas.width/2,canvas.height/2);ctx.scale(WORLD_ZOOM,WORLD_ZOOM);ctx.translate(-canvas.width/2,-canvas.height/2);
   const shell=document.getElementById('shell'),music=document.getElementById('music'),hostVideo=document.getElementById('host-video');
   const goSound=(()=>{const a=new Audio('/assets/countdown-go.mp3');a.preload='auto';a.volume=.9;return a;})();
   const audioMix=window.LiveAudio.create(music,goSound),lifecycle=window.RaceLifecycle.create();
@@ -60,9 +71,12 @@
   function showEvent(user,gift,effect,type='gift',duration=3000,causeText,effectText){el('event-cause').textContent=causeText||`${user} ENVIOU ${gift}`;el('event-effect').textContent=effectText||`${effect} ATIVADO!`;el('event-avatar').textContent=String(user).replace(/^@/,'').charAt(0).toUpperCase()||'?';const w=el('world-event');w.textContent=`${gift} → ${effect}`;w.classList.add('active');state.eventUntil=performance.now()+duration;state.eventType=type;shell.classList.toggle('galaxy',type==='galaxy');}
   function clearEvent(now){if(state.eventUntil&&now>=state.eventUntil){state.eventUntil=0;el('world-event').classList.remove('active');shell.classList.remove('galaxy');}}
   function buildGiftBar(){
+    // V4-LEGIBILITY: cartão simplificado = ICON + NOME + EFEITO (texto grande).
+    // Sem a 3.ª linha descritiva pequena. gift-who (destaque temporário) mantém-se.
+    const SHORT_EFFECT={rose:'TURBO',bomb:'OBSTÁCULO',emp:'SHOCK',galaxy:'CAOS'};
     el('gift-actions').innerHTML=BAR_ITEMS.map(item=>{
       const rule=RL.GIFT_RULES[item.id];
-      return `<div class="gift-card" data-gift="${item.id}" style="--gift:${item.color}"><span class="gift-icon">${item.icon}</span><span class="gift-body"><strong>${item.title}</strong><b>= ${EFFECT_LABELS[rule.effect]}</b><small>${item.tagline}</small><em class="gift-who"></em></span></div>`;
+      return `<div class="gift-card" data-gift="${item.id}" style="--gift:${item.color}"><span class="gift-icon">${item.icon}</span><span class="gift-body"><strong>${item.title}</strong><b>${SHORT_EFFECT[item.id]||EFFECT_LABELS[rule.effect]}</b><em class="gift-who"></em></span></div>`;
     }).join('');
   }
   const giftTimers=new Map();
@@ -115,8 +129,9 @@
   }
   function tracePath(pts){ctx.beginPath();pts.forEach((p,i)=>i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y));}
   function drawKerbs(pts){
-    ctx.lineWidth=7;
-    for(let i=0;i<pts.length-1;i+=1){ctx.strokeStyle=(i%2)?'#ff2f5e':'#f2f7ff';ctx.beginPath();ctx.moveTo(pts[i].x,pts[i].y);ctx.lineTo(pts[i+1].x,pts[i+1].y);ctx.stroke();}
+    // V4-LEGIBILITY: kerbs mais largos/brilhantes — borda da pista legível ao 1.º olhar.
+    ctx.lineWidth=9;
+    for(let i=0;i<pts.length-1;i+=1){ctx.strokeStyle=(i%2)?'#ff2f5e':'#ffffff';ctx.beginPath();ctx.moveTo(pts[i].x,pts[i].y);ctx.lineTo(pts[i+1].x,pts[i+1].y);ctx.stroke();}
     ctx.lineWidth=1;
   }
   function drawChevrons(){
@@ -137,8 +152,9 @@
     return edge.map((p,i)=>{const c=center[i%center.length];const dx=p.x-c.x,dy=p.y-c.y,l=Math.hypot(dx,dy)||1;return {x:p.x+dx/l*out,y:p.y+dy/l*out};});
   }
   function drawBarrier(pts){
-    ctx.save();ctx.shadowColor='rgba(32,231,255,.85)';ctx.shadowBlur=10;
-    ctx.strokeStyle='rgba(96,240,255,.8)';ctx.lineWidth=3;
+    // V4-LEGIBILITY: barreira neon mais presente (separação pista/cidade).
+    ctx.save();ctx.shadowColor='rgba(32,231,255,.9)';ctx.shadowBlur=14;
+    ctx.strokeStyle='rgba(96,240,255,.95)';ctx.lineWidth=4;
     ctx.beginPath();pts.forEach((p,i)=>i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y));ctx.closePath();ctx.stroke();
     ctx.restore();
   }
@@ -159,20 +175,24 @@
     const mesh=trackMesh,left=mesh.left,right=mesh.right,HW=TG.TRACK_PATH.roadHalfWidth;
     ctx.save();ctx.lineJoin='round';ctx.lineCap='round';
     // FUNDO: transparente → o cenário da cidade neon (neon-world.jpg) vê-se
-    // através do canvas. Asfalto só onde a estrada existe.
-    ctx.clearRect(0,0,canvas.width,canvas.height);
+    // através do canvas. Asfalto só onde a estrada existe. (clearRect vive no
+    // draw() em espaço de ecrã; com a margem de zoom nunca apaga píxeis de karts.)
     ctx.beginPath();
     left.forEach((p,i)=>i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y));ctx.closePath();
     right.slice().reverse().forEach((p,i)=>i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y));ctx.closePath();
     const asphalt=ctx.createLinearGradient(0,0,0,canvas.height);
-    asphalt.addColorStop(0,'#303d50');asphalt.addColorStop(.45,'#1a2638');asphalt.addColorStop(1,'#263343');
-    ctx.shadowColor='#000';ctx.shadowBlur=16;ctx.shadowOffsetY=10;
+    asphalt.addColorStop(0,'#3a495e');asphalt.addColorStop(.45,'#1e2c40');asphalt.addColorStop(1,'#2b3a4e');
+    // V4-LEGIBILITY: sombra do asfalto mais forte — a pista "assenta" sobre a cidade.
+    ctx.shadowColor='rgba(0,0,0,.95)';ctx.shadowBlur=26;ctx.shadowOffsetY=14;
     ctx.fillStyle=asphalt;ctx.fill('evenodd');
     ctx.shadowBlur=0;ctx.shadowOffsetY=0;
+    // V4-LEGIBILITY: contorno escuro no limite do asfalto (aresta clara) +
+    // barreiras deslocadas mais para fora — silhueta da pista inconfundível.
+    ctx.strokeStyle='rgba(6,12,26,.9)';ctx.lineWidth=4;ctx.stroke();
     ctx.save();ctx.clip('evenodd');ctx.strokeStyle='rgba(181,210,225,.065)';ctx.lineWidth=1;for(let y=60;y<690;y+=5){ctx.beginPath();ctx.moveTo(20,y);ctx.lineTo(700,y+17);ctx.stroke();}ctx.restore();
     drawKerbs(left);drawKerbs(right);
-    drawBarrier(offsetOutward(left,mesh.center,7));
-    drawBarrier(offsetOutward(right,mesh.center,7));
+    drawBarrier(offsetOutward(left,mesh.center,9));
+    drawBarrier(offsetOutward(right,mesh.center,9));
     for(let i=0;i<48;i++){const p=TG.centerPoint(i/48),pulse=state.phase==='waiting'?.4:.65+Math.sin(now*.004+i*.6)*.25;for(const side of [-1,1]){const x=p.x+p.ty*(HW+13)*side,y=p.y-p.tx*(HW+13)*side;ctx.fillStyle='#07121f';ctx.fillRect(x-3,y-2,6,10);ctx.shadowBlur=9;ctx.shadowColor=state.phase==='final_sprint'?'#ffd84d':'#41d6ff';ctx.fillStyle=state.phase==='final_sprint'?`rgba(255,210,77,${pulse})`:`rgba(98,227,255,${pulse})`;ctx.fillRect(x-2,y-3,4,3);ctx.shadowBlur=0;}}
     ctx.setLineDash([14,16]);ctx.strokeStyle='rgba(255,255,255,.4)';ctx.lineWidth=3;tracePath(mesh.center);ctx.stroke();ctx.setLineDash([]);
     drawChevrons();
@@ -211,12 +231,21 @@
   function finishRoutePoint(r){
     return TG.finishRoutePoint(r.finishPosition||1,r.finishRoute);
   }
+  // V4-LEGIBILITY: contorno local atrás de cada kart — silhueta separa-se do
+  // asfalto e dos rivais sem etiquetas a flutuar (nomes ficam no HUD/TOP3).
+  const KART_OUTLINE=.9;
   function drawKart(r,rank,now){
     let p;if(r.finished)p=finishRoutePoint(r);else if(['grid','countdown'].includes(state.phase))p=TG.startGrid(state.racers.length||16)[r.gridIndex];else p=TG.pointAt(r.displayProgress,r.lane);
     if(!p)return;
     const t=TEAM_DEFS[r.teamId],boost=now<r.boostUntil||now<r.visualBoostUntil,shocked=now<r.shockUntil||now<r.visualShockUntil;
     const speed=Math.hypot(p.tx,p.ty)||1;
     ctx.save();
+    // V4-LEGIBILITY: aura de contraste local (sombra suave + rim team-color)
+    // desenhada ANTES do rasto, por baixo de tudo do kart.
+    ctx.save();ctx.globalAlpha=KART_OUTLINE;ctx.shadowColor=hexToRgba(t.color,.95);ctx.shadowBlur=16;
+    ctx.fillStyle='rgba(2,6,18,.55)';ctx.beginPath();ctx.ellipse(p.x+2,p.y+4,26,15,0,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle=hexToRgba(t.color,.4);ctx.beginPath();ctx.ellipse(p.x,p.y,24,14,0,0,Math.PI*2);ctx.fill();
+    ctx.restore();
     // rasto neon (so em corrida): fita da posição anterior até à atual
     if(racing()&&!r.finished){
       const prev=TG.pointAt(((r.displayProgress-0.012)%1+1)%1,r.lane);
@@ -225,8 +254,8 @@
     }
     ctx.translate(p.x+2,p.y+4);ctx.rotate(p.angle);ctx.fillStyle='rgba(0,0,0,.6)';ctx.beginPath();ctx.ellipse(0,0,23,14,0,0,Math.PI*2);ctx.fill();ctx.rotate(-p.angle);ctx.translate(-2,-4);ctx.rotate(p.angle);ctx.scale(KART_SCALE*(boost?1.04:shocked?.96:1),KART_SCALE);
     // brilho/aura da equipa
-    ctx.shadowColor=t.color;ctx.shadowBlur=boost?20:10;
-    ctx.fillStyle=hexToRgba(t.color,.3);ctx.beginPath();ctx.ellipse(0,0,24,12,0,0,Math.PI*2);ctx.fill();
+    ctx.shadowColor=t.color;ctx.shadowBlur=boost?24:14;
+    ctx.fillStyle=hexToRgba(t.color,.34);ctx.beginPath();ctx.ellipse(0,0,25,12.5,0,0,Math.PI*2);ctx.fill();
     ctx.shadowBlur=0;
     if(boost){ctx.shadowColor='#20e7ff';ctx.shadowBlur=14;ctx.fillStyle='#28bfff';ctx.beginPath();ctx.moveTo(-18,-7);ctx.lineTo(-48-Math.sin(now*.06)*9,0);ctx.lineTo(-18,7);ctx.fill();ctx.fillStyle='#fff4bf';ctx.beginPath();ctx.moveTo(-18,-3);ctx.lineTo(-35,0);ctx.lineTo(-18,3);ctx.fill();ctx.shadowBlur=0;}
     if(shocked){ctx.strokeStyle='#fff19c';ctx.shadowColor='#b5baff';ctx.shadowBlur=12;ctx.lineWidth=2.4;ctx.beginPath();for(let k=0;k<=12;k++){const a=k/12*Math.PI*2,rr=k%2?23:17;const x=Math.cos(a+now*.004)*rr,y=Math.sin(a+now*.004)*rr;k?ctx.lineTo(x,y):ctx.moveTo(x,y);}ctx.stroke();ctx.shadowBlur=0;}
@@ -253,14 +282,18 @@
     // badge de número/posição (como na mestre)
     ctx.save();ctx.translate(p.x,p.y);
     ctx.fillStyle='rgba(4,8,22,.92)';ctx.strokeStyle=t.color;ctx.lineWidth=1.6;
-    ctx.beginPath();ctx.roundRect(-11,-30,22,13,3);ctx.fill();ctx.stroke();
-    ctx.fillStyle='#fff';ctx.font='900 10px Arial';ctx.textAlign='center';ctx.fillText('P'+rank,0,-20.5);
-    ctx.fillStyle=t.color;ctx.beginPath();ctx.arc(16,-23,6,0,Math.PI*2);ctx.fill();ctx.fillStyle='#07122b';ctx.font='900 8px Arial';ctx.fillText(r.username.replace(/^@/,'').charAt(0).toUpperCase(),16,-20);
-    if(now<r.overtakeUntil){ctx.strokeStyle='#fff';ctx.lineWidth=2;ctx.strokeRect(-23,-17,46,34);}
+    ctx.beginPath();ctx.roundRect(-12,-33,24,14,3);ctx.fill();ctx.stroke();
+    ctx.fillStyle='#fff';ctx.font='900 11px Arial';ctx.textAlign='center';ctx.fillText('P'+rank,0,-22.5);
+    ctx.fillStyle=t.color;ctx.beginPath();ctx.arc(17.5,-25.5,6.5,0,Math.PI*2);ctx.fill();ctx.fillStyle='#07122b';ctx.font='900 8.5px Arial';ctx.fillText(r.username.replace(/^@/,'').charAt(0).toUpperCase(),17.5,-22.5);
+    if(now<r.overtakeUntil){ctx.strokeStyle='#fff';ctx.lineWidth=2;ctx.strokeRect(-27,-20,54,40);}
     ctx.restore();
   }
   const trackMesh=TG.roadMesh(240);
-  function draw(now){ctx.clearRect(0,0,canvas.width,canvas.height);drawTrackGeometry(now);drawDrones(now);drawGrid();for(const hazard of state.obstacles||[]){if(now>hazard.until)continue;const p=TG.pointAt(hazard.progress,hazard.lane);ctx.save();ctx.translate(p.x,p.y);ctx.rotate(p.angle);ctx.fillStyle='#ff792c';ctx.shadowColor='#ff792c';ctx.shadowBlur=15;ctx.fillRect(-5,-17,10,34);ctx.shadowBlur=0;ctx.fillStyle='#101724';for(let j=-15;j<16;j+=9)ctx.fillRect(-5,j,10,4);ctx.restore();}const ranked=RL.rankRacers(state.racers);ranked.forEach((r,i)=>drawKart(r,i+1,now));}
+  function draw(now){
+    // V4 ZOOM: frame() faz clearRect; por cá só rearma a transform de zoom.
+    ctx.save();ctx.setTransform(1,0,0,1,0,0);ctx.clearRect(0,0,canvas.width,canvas.height);ctx.restore();
+    drawTrackGeometry(now);drawDrones(now);drawGrid();for(const hazard of state.obstacles||[]){if(now>hazard.until)continue;const p=TG.pointAt(hazard.progress,hazard.lane);ctx.save();ctx.translate(p.x,p.y);ctx.rotate(p.angle);ctx.fillStyle='#ff792c';ctx.shadowColor='#ff792c';ctx.shadowBlur=15;ctx.fillRect(-5,-17,10,34);ctx.shadowBlur=0;ctx.fillStyle='#101724';for(let j=-15;j<16;j+=9)ctx.fillRect(-5,j,10,4);ctx.restore();}const ranked=RL.rankRacers(state.racers);ranked.forEach((r,i)=>drawKart(r,i+1,now));
+  }
   function frame(now){const dt=Math.min(.05,(now-state.lastNow)/1000);state.lastNow=now;tickLifecycle(now);tickRace(dt,now);clearEvent(now);if(now>state.cameraUntil)delete shell.dataset.camera;draw(now);state.frameCount+=1;if(now-state.lastFpsAt>=250){state.fps=state.frameCount*1000/(now-state.lastFpsAt);state.fpsSamples.push(state.fps);if(state.fpsSamples.length>120)state.fpsSamples.shift();state.frameCount=0;state.lastFpsAt=now;renderHud();}requestAnimationFrame(frame);}
   function gift(id,user='@HUGO',source='demo',identity=null){
     const rule=RL.GIFT_RULES[id];if(!rule)return null;
