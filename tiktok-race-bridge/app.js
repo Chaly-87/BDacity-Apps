@@ -2,7 +2,9 @@
   'use strict';
   const RL=window.RaceLogic,TG=window.TrackGeometry;
   if(!RL||!TG)throw new Error('Race modules unavailable');
-  const TOTAL_LAPS=RL.TOTAL_LAPS,RACE_TIME=900,MAX_RACERS=16;
+  // V4 LIVE: relógio da corrida = MAX_RACE_DURATION (300s). A corrida termina
+  // sempre: 10 voltas de alguém OU 5:00 no relógio — o que chegar primeiro.
+  const TOTAL_LAPS=RL.TOTAL_LAPS,RACE_TIME=RL.MAX_RACE_DURATION,MAX_RACERS=16;
   const TEAM_DEFS=[
     {id:0,key:'red',name:'EQUIPA RED',color:'#ff315f',rgb:[255,49,95]},
     {id:1,key:'blue',name:'EQUIPA BLUE',color:'#24a4ff',rgb:[36,164,255]},
@@ -33,8 +35,16 @@
   // enviado pela ponte (evento roomUser/stats). Sem dados → oculto.
   function setViewerCount(n){const v=el('viewers');if(!v)return;const num=Math.max(0,Math.floor(Number(n)));if(Number.isFinite(num)&&num>0){v.hidden=false;v.textContent='◉ '+num.toLocaleString('pt-PT');}else{v.hidden=true;}}
   const canvas=document.getElementById('race-canvas'),ctx=canvas.getContext('2d',{alpha:true});
-  // (a transformação de zoom é aplicada aqui — ctx já existe)
-  ctx.translate(canvas.width/2,canvas.height/2);ctx.scale(WORLD_ZOOM,WORLD_ZOOM);ctx.translate(-canvas.width/2,-canvas.height/2);
+  // V4 LIVE-SOURCE: backing store = tamanho CSS real do elemento (1 píxel de
+  // raster por píxel de output). NÃO é zoom — é RESOLUÇÃO: no stream 1080×1920
+  // o canvas rasteriza a 1080 (nítido) em vez de esticar os 720 originais;
+  // a 720 mantém o custo original. Coordenas de jogo continuam 720×720.
+  // Câmara mantém +10% (WORLD_ZOOM).
+  const BACKING=Math.max(720,Math.round(canvas.getBoundingClientRect().width)||720);
+  canvas.width=BACKING;canvas.height=BACKING;
+  ctx.scale(BACKING/720,BACKING/720);
+  // (a transformação de zoom de câmara é aplicada aqui — ctx já existe)
+  ctx.translate(360,360);ctx.scale(WORLD_ZOOM,WORLD_ZOOM);ctx.translate(-360,-360);
   const shell=document.getElementById('shell'),music=document.getElementById('music'),hostVideo=document.getElementById('host-video');
   const goSound=(()=>{const a=new Audio('/assets/countdown-go.mp3');a.preload='auto';a.volume=.9;return a;})();
   const audioMix=window.LiveAudio.create(music,goSound),lifecycle=window.RaceLifecycle.create();
@@ -124,7 +134,7 @@
     const leader=RL.rankRacers(state.racers)[0];
     if(state.phase==='race'&&leader?.completedLaps>=TOTAL_LAPS-1){transition('final_sprint');shell.classList.add('sprint');cameraPulse('sprint');setRaceCopy('FINAL SPRINT','O LÍDER ENTROU NA ÚLTIMA VOLTA');}
     if(lastLeader&&leader&&lastLeader!==leader.userId&&!leader.finished){leader.overtakeUntil=now+650;}lastLeader=leader?.userId;
-    if(state.phase!=='finishing'&&state.remaining<=0)transition('finishing','race-timeout');
+    if(state.phase!=='finishing'&&state.remaining<=0){finishByTimeout(now);return;}
     if(state.phase==='finishing'&&((state.racers.every(r=>r.finished)&&state.racers.every(r=>r.finishRoute>=1))||(state.firstFinishAt==null&&state.remaining<=0)||(state.firstFinishAt!=null&&now-state.firstFinishAt>=45000)))showResults();
   }
   function tracePath(pts){ctx.beginPath();pts.forEach((p,i)=>i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y));}
@@ -336,6 +346,17 @@
     if(!firstRacerViaLike&&milestones.length){const racer=RL.findRacerForUser(state.racers,user);if(racer){racer.boostUntil=performance.now()+1800;showEvent(display,`${total} LIKES`,'BÓNUS VELOCIDADE','likes');}}
     maybeStartRealRace();}
   function showResults(){if(state.phase!=='finishing')return;transition('results');shell.classList.remove('sprint','galaxy');setMusicLevel(MUSIC_LEVELS.results);const ranked=RL.rankRacers(state.racers),winner=ranked.find(r=>r.finishPosition===1);shell.style.setProperty('--winner',winner?TEAM_DEFS[winner.teamId].color:'#20e7ff');const box=el('results');box.hidden=false;box.innerHTML=`<small class="results-kicker">NEON RUSH CITY • CORRIDA ${lifecycle.snapshot().round}</small><h2>${winner?'TEMOS VENCEDOR':'TEMPO ESGOTADO'}</h2><div class="podium">${ranked.slice(0,3).map((r,i)=>`<div style="--team:${TEAM_DEFS[r.teamId].color}"><b>${r.finished?'P'+r.finishPosition:'DNF'}</b><span>${safeText(r.username)}</span><small>${TEAM_DEFS[r.teamId].name}</small></div>`).join('')}</div><strong class="winning-team">${winner?TEAM_DEFS[winner.teamId].name+' VENCEU':'SEM VENCEDOR'}</strong><p>${state.finishCount}/${ranked.length} NA META · ${TOTAL_LAPS} VOLTAS</p><em>PRÓXIMA CORRIDA EM <span id="next-race-seconds">8</span>S</em>`;setRaceCopy('RESULTADOS FINAIS','A PRÓXIMA GRELHA ESTÁ A CHEGAR');state.lastRound=ranked.map(r=>({id:r.userId,position:r.finishPosition,laps:r.completedLaps,finished:r.finished}));}
+  // V4 LIVE: cap absoluto de 5 minutos (MAX_RACE_DURATION). Congela o progresso
+  // (racing() deixa de ser verdade), calcula o ranking final — terminados por
+  // finishPosition, restantes por voltas+trackProgress —, atribui posições e
+  // segue para FINISHING → RESULTS (~8s) → RESETTING → WAITING. Nada excede 5:00.
+  function finishByTimeout(now){
+    const ranked=RL.timeoutRanking(state.racers);
+    let next=ranked.filter(r=>r.finished).length+1;
+    ranked.filter(r=>!r.finished).forEach(r=>{RL.finishRacer(r,next,now-state.raceStartedAt);next+=1;});
+    transition('finishing','max-race-duration');
+    showEvent('RELÓGIO','5:00','FIM DA CORRIDA','finish',2200,'TEMPO ESGOTADO','O LÍDER NO LIMITE VENCE');
+  }
   function resetFromResults(){if(state.phase!=='results'&&state.phase!=='resetting')return;if(state.phase==='results')transition('resetting');el('results').hidden=true;shell.classList.remove('sprint','galaxy');delete shell.dataset.camera;state.racers=[];state.finishCount=0;state.firstFinishAt=null;state.remaining=RACE_TIME;state.raceStartedAt=0;state.giftCooldowns={};state.lastGift=null;state.eventUntil=0;state.eventType='';state.obstacles=[];lastLeader=null;giftTimers.forEach(clearTimeout);giftTimers.clear();document.querySelectorAll('.gift-card.active').forEach(c=>{c.classList.remove('active');c.querySelector('.gift-who').textContent='';});el('world-event').classList.remove('active');el('event-cause').textContent='NOVA CORRIDA';el('event-effect').textContent='A PREPARAR A ARENA';setRaceCopy('A PREPARAR A ARENA','A PRÓXIMA CORRIDA COMEÇA JÁ');setMusicLevel(MUSIC_LEVELS.waiting);renderHud();phaseDeadline=performance.now()+durations.resetting;}
   function fillNextGrid(now){
     const queued=[...state.queue.entries()],returning=[...eligible.entries()].filter(([,u])=>now-u.lastInteraction<ELIGIBLE_MS);

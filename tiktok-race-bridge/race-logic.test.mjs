@@ -35,6 +35,28 @@ function makeRacer(overrides = {}) {
   });
 }
 
+// V4 LIVE: cap absoluto de 5 minutos (MAX_RACE_DURATION = 300 s).
+test('MAX_RACE_DURATION exposto e igual a 300', () => {
+  assert.equal(R.MAX_RACE_DURATION, 300);
+});
+
+test('timeoutRanking: terminados por posição, restantes por voltas+progresso', () => {
+  const finishedP2 = R.makeRacerState({ userId: 'u1', username: 'P2', finished: true, finishPosition: 2, completedLaps: 10 });
+  const leader = R.makeRacerState({ userId: 'u2', username: 'LIDER', completedLaps: 8, currentLap: 9, trackProgress: 0.9 });
+  const mid = R.makeRacerState({ userId: 'u3', username: 'MEIO', completedLaps: 9, currentLap: 10, trackProgress: 0.1 });
+  const tail = R.makeRacerState({ userId: 'u4', username: 'CAUDA', completedLaps: 6, currentLap: 7, trackProgress: 0.3 });
+  const ranked = R.timeoutRanking([tail, finishedP2, leader, mid]);
+  assert.deepEqual(toPlain(ranked.map((r) => r.username)), ['P2', 'MEIO', 'LIDER', 'CAUDA']);
+});
+
+test('timeoutRanking: líder no limite vence (empate de voltas resolvido por trackProgress)', () => {
+  const a = R.makeRacerState({ userId: 'ua', username: 'A', completedLaps: 7, currentLap: 8, trackProgress: 0.99 });
+  const b = R.makeRacerState({ userId: 'ub', username: 'B', completedLaps: 7, currentLap: 8, trackProgress: 0.01 });
+  const ranked = R.timeoutRanking([b, a]);
+  assert.equal(ranked[0].username, 'A');
+  assert.equal(ranked[1].username, 'B');
+});
+
 test('1. dois racers em voltas diferentes', () => {
   const joao = makeRacer({ username: 'João', userId: 'u1', completedLaps: 4, currentLap: 5, trackProgress: 0.8 });
   const ana = makeRacer({ username: 'Ana', userId: 'u2', completedLaps: 7, currentLap: 8, trackProgress: 0.15 });

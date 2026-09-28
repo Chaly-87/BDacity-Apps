@@ -64,7 +64,7 @@ button{font:inherit}#shell{position:relative;width:min(100vw,calc(100vh * .5625)
 #shell[data-phase="countdown"] .countdown-overlay{display:grid}
 .countdown-overlay small{font:900 2cqw Arial;letter-spacing:.3em;color:#fff}.countdown-overlay b{font:900 20cqw/1.1 Impact,Arial;color:#fff;text-shadow:0 0 5cqw #23e7ff}.countdown-overlay span{font:800 1.3cqw Arial;letter-spacing:.12em;color:#5deeff}
 .rush-hub{left:36.5cqw;top:21.5cqh;width:27cqw;min-height:17cqh;background:linear-gradient(145deg,rgba(8,21,41,.96),rgba(2,8,23,.93));border:.17cqw solid #335a73;box-shadow:0 1cqh 2cqw #010713,0 0 0 .6cqw #07122780}
-.rush-hub>strong{font-size:2cqw;letter-spacing:.2em;border-color:#23465d}.rush-hub li{font-size:1.3cqw;padding:.16cqh 0}.rush-hub>small{font-size:1.15cqw;line-height:1.35}.rush-hub>span{font-size:1.7cqw}.top3 li{font-size:1.4cqw}
+.rush-hub>strong{font-size:2cqw;letter-spacing:.2em;border-color:#23465d}.rush-hub li{font-size:1.3cqw;padding:.16cqh 0}.rush-hub>small{font-size:1.15cqw;line-height:1.35}.rush-hub>span{font-size:1.7cqw}
 #shell[data-phase="waiting"] .rush-hub{min-height:8cqh;top:25cqh}
 .broadcast-label{top:5cqh;left:20cqw;right:auto;text-align:left;font-size:1.35cqw}.broadcast-label span{font-size:1.1cqw;margin-top:.3cqh}
 .race-banner{left:21cqw;width:58cqw;bottom:1.4cqh;height:4.4cqh;border-color:#345974;box-shadow:0 .6cqh 2cqw #020713}.race-banner strong{font-size:2.15cqw}.race-banner small{font-size:1.1cqw;margin-top:.25cqh}

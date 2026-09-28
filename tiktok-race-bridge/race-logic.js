@@ -5,6 +5,9 @@
   const TOTAL_LAPS = 10;
   const TRACK_LENGTH = 1000;
   const FINISH_GRACE_MS = 45000;
+  // REGRA ABSOLUTA (V4 LIVE): nenhuma corrida excede 5 minutos. TOTAL_LAPS
+  // mantém-se 10; o cap decide quando ninguém chega aos 10 antes do limite.
+  const MAX_RACE_DURATION = 300;
   const MODES = Object.freeze({
     LIVE_COMPLIANT: 'LIVE_COMPLIANT',
     LIVE_INTERACTIVE: 'LIVE_INTERACTIVE',
@@ -197,6 +200,14 @@
     if (!list.length) return false;
     if (list.every((racer) => racer && racer.finished)) return true;
     return Number.isFinite(firstFinishAt) && Number.isFinite(now) && now - firstFinishAt >= graceMs;
+  }
+
+  // Ranking no limite dos 5 minutos (ordem final, sem mutar racers):
+  // 1.º terminados por finishPosition; restantes por voltas completas +
+  // trackProgress — exatamente a ordem de rankRacers. O chamador atribui
+  // as posições finais (i+1) aos não-terminados.
+  function timeoutRanking(racers, trackLength = TRACK_LENGTH) {
+    return rankRacers(Array.isArray(racers) ? racers : [], trackLength);
   }
 
   function crossedLikeMilestones(previous, delta, step = 1000) {
@@ -447,6 +458,7 @@
     TOTAL_LAPS,
     TRACK_LENGTH,
     FINISH_GRACE_MS,
+    MAX_RACE_DURATION,
     MODES,
     GIFT_RULES,
     makeRacerState,
@@ -454,6 +466,7 @@
     rankRacers,
     finishRacer,
     raceShouldEnd,
+    timeoutRanking,
     crossedLikeMilestones,
     likeMilestoneAction,
     giftFor,
