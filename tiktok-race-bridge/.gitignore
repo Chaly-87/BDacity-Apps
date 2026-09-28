@@ -1,6 +1,7 @@
 # User-supplied commercial music for local preview only.
 public/live-track.mp3
-public/psyfunk.mp3
+# psyfunk.mp3: música OFICIAL do jogo (V5) — tem de ir para produção.
+!public/psyfunk.mp3
 work/
 *.log
 *.err
